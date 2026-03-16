@@ -1,0 +1,12 @@
+# WebSocket server
+websockets>=12.0
+aiohttp>=3.9.0
+
+# Async runtime
+asyncio
+
+# Data storage
+pyyaml
+
+# UUID generation
+uuid
