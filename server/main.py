@@ -31,6 +31,11 @@ except ImportError:
     from rating import RatingManager, get_rating_manager
 
 
+# 新增：导入管理客户端和通道管理
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'client'))
+
+
 # 配置
 HOST = "0.0.0.0"
 PORT = 8765
@@ -40,7 +45,7 @@ CLEANUP_INTERVAL = 10  # 秒
 
 class HubServer:
     """服务撮合云端服务器"""
-    
+
     def __init__(self, host: str = HOST, port: int = PORT):
         self.host = host
         self.port = port
@@ -52,6 +57,8 @@ class HubServer:
 
         # 注册隧道转发回调
         self._client_websockets: Dict[str, ServerConnection] = {}
+        self._client_info: Dict[str, dict] = {}  # client_id -> {type, service_id}
+        self._pending_channels: Dict[str, dict] = {}  # request_id -> channel_request
         self.tunnel_mgr.on("request", self._on_tunnel_request)
     
     async def start(self):
@@ -159,6 +166,30 @@ class HubServer:
                 # 转发请求到目标服务
                 await self._handle_call_service(message)
 
+            elif msg_type == "connect":
+                # 消费者客户端连接（subagent2）
+                await self._handle_connect(websocket, client_id, message)
+
+            elif msg_type == "skill_discover":
+                # Skill 方式查询服务
+                await self._handle_skill_discover(websocket, client_id, message)
+
+            elif msg_type == "get_service_docs":
+                # 获取服务文档
+                await self._handle_get_service_docs(websocket, client_id, message)
+
+            elif msg_type == "get_skill_doc":
+                # 获取 SKILL.md
+                await self._handle_get_skill_doc(websocket, client_id, message)
+
+            elif msg_type == "establish_channel":
+                # 建立服务通道
+                await self._handle_establish_channel(websocket, client_id, message)
+
+            elif msg_type == "channel_confirm":
+                # 服务提供者确认通道
+                await self._handle_channel_confirm(websocket, client_id, message)
+
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))
             
@@ -189,8 +220,14 @@ class HubServer:
             tags=service_data.get("tags", []),
             metadata=service_data.get("metadata", {}),
             emoji=service_data.get("emoji", "🔧"),
-            requires=service_data.get("requires", {})
+            requires=service_data.get("requires", {}),
+            execution_mode=service_data.get("execution_mode", "local"),
+            interface_spec=service_data.get("interface_spec", {})
         )
+
+        # 设置提供者信息
+        service.provider_client_id = client_id
+        client_type = message.get("client_type", "full")  # "management_only" | "full"
 
         # 注册到服务注册表（包含 skill_doc）
         service_id = await self.registry.register(service, skill_doc)
@@ -212,6 +249,232 @@ class HubServer:
         }))
 
         print(f"[Server] Service registered: {service.name} -> tunnel {tunnel.id}")
+        print(f"[Server]   Execution mode: {service.execution_mode}, Client type: {client_type}")
+
+    async def _handle_connect(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理消费者客户端连接"""
+        client_type = message.get("client_type", "consumer")
+        self._client_info[client_id] = {
+            "type": client_type,
+            "connected_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        await websocket.send(json.dumps({
+            "type": "connected",
+            "client_id": client_id,
+            "client_type": client_type
+        }))
+
+        print(f"[Server] Consumer connected: {client_id} ({client_type})")
+
+    async def _handle_skill_discover(
+        self,
+        websocket: ServerConnection,
+        client_id: str,
+        message: dict
+    ):
+        """处理 skill 方式服务发现"""
+        request_id = message.get("request_id")
+        query = message.get("query", "")
+        tags = message.get("tags", [])
+        execution_mode = message.get("execution_mode")
+        status = message.get("status", "online")
+
+        # 查找服务
+        services = self.registry.find(
+            name=query,
+            tags=tags if tags else None,
+            status=status,
+            execution_mode=execution_mode
+        )
+
+        # 转换为 skill 描述符
+        skill_list = [s.to_skill_descriptor() for s in services]
+
+        await websocket.send(json.dumps({
+            "type": "skill_list",
+            "request_id": request_id,
+            "skills": skill_list,
+            "total": len(skill_list)
+        }))
+
+        print(f"[Server] Skill discover from {client_id}: found {len(skill_list)} services")
+
+    async def _handle_get_service_docs(
+        self,
+        websocket: ServerConnection,
+        client_id: str,
+        message: dict
+    ):
+        """处理获取服务文档请求"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+
+        service = self.registry.get(service_id)
+
+        if service:
+            response = {
+                "type": "service_docs",
+                "request_id": request_id,
+                "service_id": service_id,
+                "name": service.name,
+                "description": service.description,
+                "documentation": service.description,  # 可扩展完整文档
+                "interface_spec": service.interface_spec,
+                "endpoint": service.endpoint,
+                "execution_mode": service.execution_mode,
+                "tags": service.tags
+            }
+        else:
+            response = {
+                "type": "error",
+                "request_id": request_id,
+                "message": f"Service not found: {service_id}"
+            }
+
+        await websocket.send(json.dumps(response))
+
+    async def _handle_get_skill_doc(
+        self,
+        websocket: ServerConnection,
+        client_id: str,
+        message: dict
+    ):
+        """处理获取 SKILL.md 请求"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+
+        skill_doc = self.registry.get_skill_doc(service_id)
+
+        if skill_doc:
+            response = {
+                "type": "skill_doc",
+                "request_id": request_id,
+                "service_id": service_id,
+                "skill_doc": skill_doc
+            }
+        else:
+            response = {
+                "type": "error",
+                "request_id": request_id,
+                "message": f"Skill doc not found for service: {service_id}"
+            }
+
+        await websocket.send(json.dumps(response))
+
+    async def _handle_establish_channel(
+        self,
+        websocket: ServerConnection,
+        client_id: str,
+        message: dict
+    ):
+        """处理建立通道请求"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+        consumer_client_id = message.get("consumer_client_id")
+
+        service = self.registry.get(service_id)
+
+        if not service:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "request_id": request_id,
+                "message": f"Service not found: {service_id}"
+            }))
+            return
+
+        # 检查服务是否在线
+        if service.status != "online":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "request_id": request_id,
+                "message": f"Service is offline: {service_id}"
+            }))
+            return
+
+        # 对于管理型服务，需要通知提供者确认
+        if service.execution_mode == "external" and service.provider_client_id:
+            # 存储待确认的通道请求
+            channel_request_id = str(uuid.uuid4())[:12]
+            self._pending_channels[channel_request_id] = {
+                "request_id": request_id,
+                "service_id": service_id,
+                "consumer_client_id": consumer_client_id,
+                "provider_client_id": service.provider_client_id,
+                "tunnel_id": service.tunnel_id
+            }
+
+            # 通知提供者
+            provider_ws = self._client_websockets.get(service.provider_client_id)
+            if provider_ws:
+                await provider_ws.send(json.dumps({
+                    "type": "channel_request",
+                    "request_id": channel_request_id,
+                    "service_id": service_id,
+                    "user_client_id": consumer_client_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }))
+
+            print(f"[Server] Channel request {channel_request_id} sent to provider {service.provider_client_id}")
+
+        else:
+            # 本地执行模式，直接建立通道
+            await websocket.send(json.dumps({
+                "type": "channel_established",
+                "request_id": request_id,
+                "service_id": service_id,
+                "channel_id": service.tunnel_id,
+                "tunnel_id": service.tunnel_id,
+                "execution_mode": service.execution_mode,
+                "endpoint": service.endpoint
+            }))
+
+            print(f"[Server] Channel established for {service_id} (local mode)")
+
+    async def _handle_channel_confirm(
+        self,
+        websocket: ServerConnection,
+        client_id: str,
+        message: dict
+    ):
+        """处理服务提供者通道确认"""
+        request_id = message.get("request_id")  # channel_request_id
+        accepted = message.get("accepted", False)
+        service_id = message.get("service_id")
+        tunnel_id = message.get("tunnel_id")
+
+        # 查找对应的消费者请求
+        channel_req = self._pending_channels.pop(request_id, None)
+
+        if not channel_req:
+            print(f"[Server] Channel request {request_id} not found or expired")
+            return
+
+        consumer_ws = self._client_websockets.get(channel_req["consumer_client_id"])
+
+        if accepted:
+            # 通道建立成功
+            if consumer_ws:
+                await consumer_ws.send(json.dumps({
+                    "type": "channel_established",
+                    "request_id": channel_req["request_id"],
+                    "service_id": service_id,
+                    "channel_id": request_id,
+                    "tunnel_id": tunnel_id,
+                    "execution_mode": "external"
+                }))
+
+            print(f"[Server] Channel {request_id} established (external mode)")
+        else:
+            # 通道被拒绝
+            if consumer_ws:
+                await consumer_ws.send(json.dumps({
+                    "type": "error",
+                    "request_id": channel_req["request_id"],
+                    "message": "Channel request rejected by service provider"
+                }))
+
+            print(f"[Server] Channel {request_id} rejected")
     
     async def _handle_heartbeat(self, client_id: str, message: dict):
         """处理心跳"""

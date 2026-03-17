@@ -1,0 +1,39 @@
+#!/bin/bash
+# 发现服务 - 列出 Hub 上所有可用服务
+
+HUB_URL="${HUB_URL:-http://localhost:3765}"
+
+# 解析参数
+TAGS=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --tags|-t)
+            TAGS="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "用法: discover [--tags tag1,tag2]"
+            echo ""
+            echo "选项:"
+            echo "  --tags, -t    按标签过滤服务"
+            echo ""
+            echo "环境变量:"
+            echo "  HUB_URL    Hub 地址 (默认: http://localhost:3765)"
+            exit 0
+            ;;
+        *)
+            echo "未知参数: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# 构建请求 URL
+URL="${HUB_URL}/api/services"
+
+# 发送请求
+if [ -n "$TAGS" ]; then
+    curl -s "${URL}?tags=${TAGS}"
+else
+    curl -s "${URL}"
+fi

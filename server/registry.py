@@ -17,7 +17,7 @@ class ToolService:
     name: str
     description: str
     version: str = "1.0.0"
-    endpoint: str = ""  # 本地服务地址
+    endpoint: str = ""  # 本地服务地址（外部执行器地址）
     tags: List[str] = None
     metadata: dict = None
 
@@ -33,6 +33,12 @@ class ToolService:
     # 隧道
     tunnel_id: Optional[str] = None
 
+    # 新增：服务与执行器分离支持
+    execution_mode: str = "local"  # "local" | "remote" | "external"
+    provider_client_id: Optional[str] = None  # 注册此服务的管理客户端ID
+    executor_endpoint: Optional[str] = None  # 外部执行器地址（如n8n webhook）
+    interface_spec: dict = None  # 接口规范 {"methods": [...], "schema": {...}}
+
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
@@ -40,6 +46,8 @@ class ToolService:
             self.metadata = {}
         if self.requires is None:
             self.requires = {}
+        if self.interface_spec is None:
+            self.interface_spec = {}
         if not self.registered_at:
             self.registered_at = datetime.now(timezone.utc).isoformat()
 
@@ -57,7 +65,24 @@ class ToolService:
             "emoji": self.emoji,
             "requires": self.requires,
             "status": self.status,
-            "tunnel_id": self.tunnel_id
+            "tunnel_id": self.tunnel_id,
+            "execution_mode": self.execution_mode,
+            "provider_client_id": self.provider_client_id
+        }
+
+    def to_skill_descriptor(self) -> dict:
+        """返回 skill 风格描述符，用于 skill 方式查询"""
+        return {
+            "skill_id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "version": self.version,
+            "emoji": self.emoji,
+            "tags": self.tags,
+            "requires": self.requires,
+            "execution_mode": self.execution_mode,
+            "interface_spec": self.interface_spec,
+            "status": self.status
         }
 
     @classmethod
@@ -139,28 +164,36 @@ class ServiceRegistry:
     def list_all_metadata(self) -> List[dict]:
         """列出所有服务的轻量级 metadata"""
         return [s.to_metadata_dict() for s in self._services.values()]
-    
+
+    def list_all_skill_descriptors(self) -> List[dict]:
+        """列出所有服务的 skill 风格描述符"""
+        return [s.to_skill_descriptor() for s in self._services.values()]
+
     def find(
-        self, 
-        name: str = None, 
+        self,
+        name: str = None,
         tags: List[str] = None,
-        status: str = None
+        status: str = None,
+        execution_mode: str = None
     ) -> List[ToolService]:
         """
         查找服务 - 类似 skill 的快速发现
-        支持按名称、标签、状态过滤
+        支持按名称、标签、状态、执行模式过滤
         """
         results = self._services.values()
-        
+
         if name:
             results = [s for s in results if name.lower() in s.name.lower()]
-        
+
         if tags:
             results = [s for s in results if any(t in s.tags for t in tags)]
-        
+
         if status:
             results = [s for s in results if s.status == status]
-        
+
+        if execution_mode:
+            results = [s for s in results if s.execution_mode == execution_mode]
+
         return list(results)
     
     async def cleanup_stale(self):

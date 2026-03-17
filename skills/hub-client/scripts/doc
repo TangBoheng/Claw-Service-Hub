@@ -1,0 +1,21 @@
+#!/bin/bash
+# 获取服务文档 - 获取服务的完整接口文档
+
+HUB_URL="${HUB_URL:-http://localhost:3765}"
+
+# 检查参数
+if [ $# -lt 1 ]; then
+    echo "用法: doc <service_id>"
+    echo ""
+    echo "参数:"
+    echo "  service_id    服务 ID"
+    echo ""
+    echo "环境变量:"
+    echo "  HUB_URL    Hub 地址 (默认: http://localhost:3765)"
+    exit 1
+fi
+
+SERVICE_ID="$1"
+
+# 发送请求
+curl -s "${HUB_URL}/api/services/${SERVICE_ID}/skill.md"
