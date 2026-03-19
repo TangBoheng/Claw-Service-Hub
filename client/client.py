@@ -313,6 +313,35 @@ class LocalServiceRunner:
         """注册方法处理器"""
         self.client.register_handler(method, handler)
     
+    def set_lifecycle_policy(self, duration_seconds: int = 3600, max_calls: int = 100):
+        """
+        设置默认生命周期策略
+        
+        Args:
+            duration_seconds: 有效时长（秒），默认1小时
+            max_calls: 最大调用次数，默认100次
+        """
+        self.lifecycle_policy = {
+            "duration_seconds": duration_seconds,
+            "max_calls": max_calls
+        }
+    
+    def set_custom_policy(self, condition: str, duration_seconds: int, max_calls: int):
+        """
+        设置自定义策略
+        
+        Args:
+            condition: 策略名称（如 "premium", "basic"）
+            duration_seconds: 有效时长
+            max_calls: 最大调用次数
+        """
+        if not hasattr(self, 'custom_policies'):
+            self.custom_policies = {}
+        self.custom_policies[condition] = {
+            "duration_seconds": duration_seconds,
+            "max_calls": max_calls
+        }
+    
     async def run(self):
         """启动服务并连接云端"""
         await self.client.connect()
