@@ -80,6 +80,9 @@ class ManagementOnlyClient:
             "disconnected": [],
         }
 
+        # 请求处理器 (method_name -> handler)
+        self._request_handlers: Dict[str, Callable] = {}
+
     def _load_skill_doc(self) -> Optional[str]:
         """从 skill_dir 加载 SKILL.md 文件内容"""
         if not self.skill_dir:
@@ -99,6 +102,49 @@ class ManagementOnlyClient:
         """注册事件回调"""
         if event in self._callbacks:
             self._callbacks[event].append(callback)
+
+    def register_handler(self, method: str, handler: Callable):
+        """注册请求处理器
+
+        用于处理消费者通过 call_service 发送的请求。
+        handler 应该是 async 函数，接收 **params 参数，返回 dict。
+
+        示例:
+            async def list_images(limit: int = 10):
+                return {"images": [...], "total": 100}
+
+            client.register_handler("list_images", list_images)
+        """
+        self._request_handlers[method] = handler
+        print(f"[ManagementClient] Handler registered for method: {method}")
+
+    async def _handle_request(self, message: dict):
+        """处理远程调用请求"""
+        request_id = message.get("request_id")
+        method = message.get("method")
+        params = message.get("params", {})
+
+        print(f"[ManagementClient] Request received: {method}({params})")
+
+        handler = self._request_handlers.get(method)
+
+        if handler:
+            try:
+                result = await handler(**params)
+                response = {"result": result}
+            except Exception as e:
+                print(f"[ManagementClient] Handler error: {e}")
+                response = {"error": str(e)}
+        else:
+            response = {"error": f"Unknown method: {method}"}
+
+        # 发送响应
+        await self.websocket.send(json.dumps({
+            "type": "response",
+            "request_id": request_id,
+            "response": response
+        }))
+        print(f"[ManagementClient] Response sent for {method}")
 
     async def connect(self):
         """连接到云端并注册服务"""
@@ -182,6 +228,10 @@ class ManagementOnlyClient:
                 print(f"[ManagementClient] Channel request from user: {message.get('user_client_id')}")
                 for cb in self._callbacks["channel_request"]:
                     await cb(message)
+
+            elif msg_type == "request":
+                # 处理远程调用请求 (external 模式)
+                await self._handle_request(message)
 
             elif msg_type == "heartbeat_ack":
                 # 心跳确认
@@ -290,6 +340,10 @@ class ServiceRegistrar:
 
         # 默认自动接受通道请求
         self.client.on("channel_request", self._on_channel_request)
+
+    def register_handler(self, method: str, handler: Callable):
+        """注册请求处理器"""
+        self.client.register_handler(method, handler)
 
     async def _on_channel_request(self, message: dict):
         """默认自动接受通道请求"""

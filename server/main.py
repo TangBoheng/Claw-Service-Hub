@@ -2,6 +2,7 @@
 服务撮合云端 - WebSocket 服务器
 Phase 1: 服务注册、发现、隧道、评分
 """
+print("[Server] Module loading...", flush=True)
 import asyncio
 import json
 import uuid
@@ -150,6 +151,10 @@ class HubServer:
             message = json.loads(raw_message)
             msg_type = message.get("type")
             
+            # 调试：打印所有消息类型
+            if msg_type not in ["heartbeat", "ping"]:
+                print(f"[Server] Received from {client_id}: type={msg_type}", flush=True)
+            
             if msg_type == "register":
                 # 注册服务
                 await self._handle_register(websocket, client_id, message)
@@ -161,6 +166,10 @@ class HubServer:
             elif msg_type == "request":
                 # 转发请求响应
                 await self._handle_request_response(client_id, message)
+            
+            elif msg_type == "response":
+                # 处理 Provider 返回的响应
+                await self._handle_response(message)
             
             elif msg_type == "call_service":
                 # 转发请求到目标服务
@@ -371,7 +380,7 @@ class HubServer:
         """处理建立通道请求"""
         request_id = message.get("request_id")
         service_id = message.get("service_id")
-        consumer_client_id = message.get("consumer_client_id")
+        consumer_client_id = client_id  # 使用实际的 WebSocket client_id，而不是消息中的
 
         service = self.registry.get(service_id)
 
@@ -443,14 +452,20 @@ class HubServer:
         service_id = message.get("service_id")
         tunnel_id = message.get("tunnel_id")
 
+        print(f"[Server] Channel confirm received: request_id={request_id}, accepted={accepted}", flush=True)
+        print(f"[Server] Pending channels: {list(self._pending_channels.keys())}", flush=True)
+
         # 查找对应的消费者请求
         channel_req = self._pending_channels.pop(request_id, None)
 
         if not channel_req:
-            print(f"[Server] Channel request {request_id} not found or expired")
+            print(f"[Server] ❌ Channel request {request_id} not found or expired", flush=True)
             return
 
+        print(f"[Server] Found channel_req: {channel_req}", flush=True)
+
         consumer_ws = self._client_websockets.get(channel_req["consumer_client_id"])
+        print(f"[Server] Consumer websocket: {consumer_ws is not None}", flush=True)
 
         if accepted:
             # 通道建立成功
@@ -529,6 +544,31 @@ class HubServer:
         request_id = message.get("request_id")
         if request_id:
             await self.tunnel_mgr.handle_response(request_id, message.get("response", {}))
+
+    async def _handle_response(self, message: dict):
+        """处理 Provider 返回的 response 消息"""
+        request_id = message.get("request_id")
+        if request_id:
+            # 查找对应的消费者 websocket
+            # 需要从 pending_channels 或其他地方找到 consumer_client_id
+            # 暂时遍历所有客户端找到匹配的 request_id
+            response_data = message.get("response", {})
+            
+            # 通过 tunnel manager 找到对应的 consumer 并发送响应
+            await self.tunnel_mgr.handle_response(request_id, response_data)
+            
+            # 发送 service_response 消息给 Consumer
+            for client_id, websocket in self._client_websockets.items():
+                try:
+                    await websocket.send(json.dumps({
+                        "type": "service_response",
+                        "request_id": request_id,
+                        "response": response_data
+                    }))
+                except Exception:
+                    pass
+            
+            print(f"[Server] Response forwarded for request {request_id}")
 
     async def _heartbeat_loop(self):
         """心跳检查循环"""

@@ -1,177 +1,402 @@
----
-name: hub-client
-description: Claw-Service-Hub 客户端。提供服务注册和远程服务调用能力。
+name: tool-service-hub
+description: 服务撮合平台 - 将任意数据源发布为服务，或调用 Hub 上的服务
 homepage: https://github.com/openclaw/claw-service-hub
 metadata:
-  clawdbot:
+  openclaw:
     emoji: "🔌"
     requires:
-      bins: ["curl", "python"]
-      env: ["HUB_URL"]
-    primaryEnv: "HUB_URL"
----
+      bins: ["python", "pip"]
+      env: ["HUB_WS_URL"]
+      pip: ["websockets", "aiohttp"]
+    primaryEnv: "HUB_WS_URL"
 
-# Hub Client
+triggers:
+  provider:
+    - 提供.*服务
+    - 发布.*服务
+    - 把.*变成服务
+    - 暴露.*接口
+    - 启动.*服务
+    - 做.*服务
+    - 实现.*服务
+  consumer:
+    - 有哪些服务
+    - 列出服务
+    - 调用.*服务
+    - 使用.*服务
+    - 查询.*数据
+    - 获取.*数据
 
-Claw-Service-Hub 服务撮合客户端。
+# Tool Service Hub Skill
 
-**两大能力：**
-1. **提供服务** - 将本地工具/数据注册为远程可调用服务
-2. **调用服务** - 发现并调用其他节点提供的服务
+## 概述
 
----
-
-## 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `HUB_URL` | Hub HTTP 地址 | `http://localhost:3765` |
-| `HUB_WS_URL` | Hub WebSocket 地址 | `ws://localhost:8765` |
-
----
-
-# 第一部分：提供服务
-
-## 1. 创建服务
-
-### 1.1 定义服务元数据
-
-```
-name: "my-service"           # 服务名称
-description: "服务描述"       # 功能说明
-tags: ["tag1", "tag2"]       # 标签，用于发现
-emoji: "🔧"                  # 图标
-```
-
-### 1.2 定义接口文档 (SKILL.md)
-
-创建一个 skill 目录，包含 `SKILL.md` 文件：
-
-```markdown
-# My Service
-
-## 功能说明
-xxx
-
-## 可调用方法
-
-### method_name
-- 描述: xxx
-- 参数: { "param1": "type" }
-- 返回: { "result": "..." }
-```
+让 subagent 能够：
+1. **Provider 模式**：将本地数据/能力发布为服务，供其他 subagent 调用
+2. **Consumer 模式**：发现 Hub 上的服务并调用
 
 ---
 
-## 2. 注册服务
+## 一、作为 Provider 发布服务
 
-使用 Python 客户端注册服务：
+### 完整代码模板
 
 ```python
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+# === 1. 设置路径 ===
+WORKSPACE_DIR = os.getenv('WORKSPACE_DIR', '/home/t/.openclaw/workspace-subagentX')
+sys.path.insert(0, WORKSPACE_DIR)
+
 from client.client import LocalServiceRunner
 
-async def my_handler(**params):
-    # 处理逻辑
-    return {"result": "..."}
+# === 2. 定义你的服务能力 ===
 
-runner = LocalServiceRunner(
-    name="my-service",
-    description="服务描述",
-    tags=["tag1"],
-    skill_dir="/path/to/skill"  # 包含 SKILL.md
-)
-runner.register_handler("method_name", my_handler)
-await runner.run()
+async def your_method(**params):
+    """
+    服务方法
+    params: 接收调用方传入的参数
+    必须返回 dict 类型
+    """
+    # 你的业务逻辑
+    result = {"status": "ok", "data": "..."}
+    return result
+
+# === 3. 启动服务 ===
+
+async def main():
+    runner = LocalServiceRunner(
+        name="your-service-name",      # 服务名（英文，无空格）
+        description="服务描述",           # 中文描述
+        hub_url=os.getenv("HUB_WS_URL", "ws://localhost:8765")
+    )
+    
+    # 注册方法（可以注册多个）
+    runner.register_handler("your_method", your_method)
+    
+    print(f"🚀 启动服务...")
+    await runner.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ---
 
-# 第二部分：调用服务
+## 二、作为 Consumer 调用服务
 
-## 1. 发现服务
-
-```bash
-# 列出所有服务
-{baseDir}/scripts/discover
-
-# 按标签过滤
-{baseDir}/scripts/discover --tags image,data
-```
-
-响应示例：
-```json
-[
-  {
-    "id": "abc123",
-    "name": "image-service",
-    "description": "图片处理服务",
-    "tags": ["image"],
-    "emoji": "🖼️",
-    "status": "online",
-    "tunnel_id": "xxx-xxx-xxx"
-  }
-]
-```
-
----
-
-## 2. 获取服务文档
-
-```bash
-{baseDir}/scripts/doc <service_id>
-```
-
-返回服务的完整接口文档，包含：
-- 功能描述
-- 可调用方法列表
-- 参数定义
-- 返回格式
-
----
-
-## 3. 调用服务
-
-### Python 方式
+### 完整代码模板
 
 ```python
-from client.client import ToolServiceClient
+import asyncio
+import os
+import sys
 
-client = ToolServiceClient(hub_url="ws://localhost:8765")
-await client.connect()
+WORKSPACE_DIR = os.getenv('WORKSPACE_DIR', '/home/t/.openclaw/workspace-subagentX')
+sys.path.insert(0, WORKSPACE_DIR)
 
-result = await client.call_remote_service(
-    tunnel_id="xxx-xxx-xxx",
-    method="method_name",
-    params={"param1": "value"}
-)
+from client.skill_client import SkillQueryClient
+
+async def main():
+    # 1. 连接 Hub
+    client = SkillQueryClient(
+        hub_url=os.getenv("HUB_WS_URL", "ws://localhost:8765")
+    )
+    await client.connect()
+    
+    # 2. 发现服务
+    services = await client.discover()
+    print(f"发现 {len(services)} 个服务")
+    
+    # 3. 找到目标服务（按名称过滤）
+    target = None
+    target_name = "weather-service"  # 替换为你的目标服务名
+    for s in services:
+        if target_name in s.get("name", ""):
+            target = s
+            break
+    
+    if not target:
+        print(f"未找到服务: {target_name}")
+        return
+    
+    skill_id = target.get("skill_id")
+    print(f"使用服务: {target.get('name')}, skill_id: {skill_id}")
+    
+    # 4. 调用服务
+    result = await client.call_service(
+        service_id=skill_id,
+        method="your_method",      # 方法名
+        params={"key": "value"}    # 参数
+    )
+    
+    print(f"结果: {result}")
+    
+    await client.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ---
 
-# 完整流程
+## 三、常见数据源示例
 
-## 作为服务提供者
+### 3.1 文件数据服务
 
+```python
+from pathlib import Path
+
+DATA_DIR = Path("/path/to/data")  # 修改为实际目录
+
+async def list_files(**params):
+    ext = params.get("extension", "")
+    pattern = f"*{ext}" if ext else "*"
+    files = [f.name for f in DATA_DIR.glob(pattern) if f.is_file()]
+    return {"files": files[:50], "total": len(files)}
+
+async def read_file(**params):
+    filename = params.get("filename")
+    if not filename:
+        return {"error": "filename is required"}
+    
+    filepath = DATA_DIR / filename
+    if not filepath.exists():
+        return {"error": f"File not found: {filename}"}
+    
+    # 文本文件直接读取
+    if filepath.suffix == '.txt':
+        return {"content": filepath.read_text()[:1000]}
+    
+    # 其他文件返回信息
+    return {"filename": filename, "size": filepath.stat().st_size}
 ```
-1. 定义服务：编写 SKILL.md + 实现处理函数
-2. 注册服务：使用 LocalServiceRunner 连接 Hub
-3. 运行服务：心跳保活 + 处理请求
+
+### 3.2 API 数据服务
+
+```python
+import aiohttp
+
+async def fetch_data(**params):
+    url = params.get("url")
+    if not url:
+        return {"error": "url is required"}
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(10)) as resp:
+                data = await resp.json()
+        return {"status": resp.status, "data": data}
+    except Exception as e:
+        return {"error": str(e)}
 ```
 
-## 作为服务消费者
+### 3.3 天气服务 (wttr.in)
 
-```
-1. 发现服务：discover 获取服务列表
-2. 获取文档：doc <service_id> 了解接口
-3. 调用服务：Python 客户端调用
+```python
+import aiohttp
+
+async def get_weather(**params):
+    city = params.get("city", "Shanghai")
+    url = f"https://wttr.in/{city}?format=j1"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(10)) as resp:
+                data = await resp.json()
+        
+        # 注意：wttr.in 返回结构是 data.current_condition
+        c = data.get("data", {}).get("current_condition", [{}])[0]
+        return {
+            "city": city,
+            "temp": int(c.get("temp_C") or 0),
+            "condition": c.get("weatherDesc", [{}])[0].get("value", "Unknown"),
+            "humidity": c.get("humidity")
+        }
+    except Exception as e:
+        return {"error": str(e)}
 ```
 
 ---
 
-## 相关命令
+## 四、工作流示例
 
-| 命令 | 说明 |
-|------|------|
-| `{baseDir}/scripts/discover` | 列出所有服务 |
-| `{baseDir}/scripts/discover --tags <tags>` | 按标签过滤 |
-| `{baseDir}/scripts/doc <service_id>` | 获取服务文档 |
+### 组合多个服务
+
+```python
+async def workflow():
+    """组合多个服务的完整工作流"""
+    client = SkillQueryClient("ws://localhost:8765")
+    await client.connect()
+    
+    services = await client.discover()
+    
+    # 找到所需服务
+    weather = next((s for s in services if "weather" in s.get("name", "")), None)
+    images = next((s for s in services if "image" in s.get("name", "")), None)
+    
+    results = {}
+    
+    # 调用天气服务
+    if weather:
+        w = await client.call_service(weather.get("skill_id"), "get_weather", {"city": "Shanghai"})
+        results["weather"] = w.get("result", {})
+    
+    # 调用图片服务
+    if images:
+        i = await client.call_service(images.get("skill_id"), "list_images", {"limit": 10})
+        results["images"] = i.get("result", {})
+    
+    await client.disconnect()
+    return results
+```
+
+---
+
+## 五、环境配置
+
+### 安装依赖
+
+```bash
+pip install websockets aiohttp
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| HUB_WS_URL | ws://localhost:8765 | Hub 地址 |
+| WORKSPACE_DIR | /home/t/.../workspace-subagentX | 工作目录 |
+
+### 启动 Hub Server（可选）
+
+```bash
+cd Claw-Service-Hub
+python -m server.main
+
+# WebSocket: ws://0.0.0.0:8765
+# REST API: http://0.0.0.0:3765
+```
+
+---
+
+## 六、故障排查
+
+### 问题 1: ImportError
+
+**错误**: `ModuleNotFoundError: No module named 'client'`
+
+**解决**: 正确设置 sys.path
+```python
+import os
+import sys
+WORKSPACE_DIR = os.getenv('WORKSPACE_DIR', '/home/t/.openclaw/workspace-subagentX')
+sys.path.insert(0, WORKSPACE_DIR)
+from client.client import LocalServiceRunner
+```
+
+### 问题 2: 服务注册成功但无法调用
+
+**检查**:
+1. Provider 进程是否还在运行
+2. 方法名是否正确（大小写敏感）
+3. 参数格式是否正确
+
+### 问题 3: API 返回 None
+
+**常见原因**: 数据结构解析错误
+
+**解决**: 先打印原始数据，确认结构
+```python
+async def get_data(**params):
+    url = params.get("url")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+    print(f"原始数据: {data}")  # 添加这行调试
+    # 然后根据实际结构解析
+    return {"data": data}
+```
+
+### 问题 4: 找不到服务
+
+**解决**: 先列出所有服务
+```python
+services = await client.discover()
+for s in services:
+    print(f"{s.get('name')}: {s.get('skill_id')}")
+```
+
+### 问题 5: 返回值必须是 dict
+
+**错误**: `TypeError: ... got an unexpected keyword argument`
+
+**解决**: handler 必须返回 dict
+```python
+async def wrong():  # 错误
+    return "string"
+
+async def right(**params):  # 正确
+    return {"result": "value"}
+```
+
+---
+
+## 七、最小示例
+
+### Provider (5行)
+
+```python
+import asyncio, os, sys
+sys.path.insert(0, os.getenv('WORKSPACE_DIR','.'))
+from client.client import LocalServiceRunner
+
+async def hello(**p): return {"msg":"Hello!"}
+r = LocalServiceRunner("demo","演示",os.getenv("HUB_WS_URL","ws://localhost:8765"))
+r.register_handler("hello", hello)
+asyncio.run(r.run())
+```
+
+### Consumer (6行)
+
+```python
+import asyncio, os, sys
+sys.path.insert(0, os.getenv('WORKSPACE_DIR','.'))
+from client.skill_client import SkillQueryClient
+
+async def main():
+    c = SkillQueryClient()
+    await c.connect()
+    print([s.get("name") for s in await c.discover()])
+    await c.disconnect()
+asyncio.run(main())
+```
+
+---
+
+## 八、文件结构
+
+```
+Claw-Service-Hub/
+├── client/
+│   ├── client.py           # LocalServiceRunner, ToolServiceClient
+│   ├── skill_client.py     # SkillQueryClient
+│   └── management_client.py
+├── skills/
+│   └── hub-client/
+│       └── SKILL.md        # 本文件
+└── server/
+    └── main.py             # Hub Server
+```
+
+---
+
+## 九、发布流程
+
+1. 确保 Hub Server 运行中 (`ws://localhost:8765`)
+2. Provider: 运行 `python your_service.py` 注册服务
+3. Consumer: 连接 Hub 发现服务
+4. Consumer: 调用服务获取结果
