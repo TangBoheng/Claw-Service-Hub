@@ -8,7 +8,7 @@ import json
 async def main():
     # 从 client 模块导入
     import sys
-    sys.path.insert(0, "/home/t/.openclaw/workspace/tool-service-hub")
+    sys.path.insert(0, "/home/t/.openclaw/workspace/claw-service-hub")
     
     from client.client import LocalServiceRunner
     

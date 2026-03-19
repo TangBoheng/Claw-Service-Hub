@@ -1,4 +1,4 @@
-name: tool-service-hub
+name: claw-service-hub
 description: 服务撮合平台 - 将任意数据源发布为服务，或调用 Hub 上的服务
 homepage: https://github.com/openclaw/claw-service-hub
 metadata:

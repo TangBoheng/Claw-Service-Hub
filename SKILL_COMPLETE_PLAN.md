@@ -1,7 +1,7 @@
 # Skill 完善计划
 
 ## 目标
-基于测试经验，创建**完整的、可发布的** tool-service-hub skill
+基于测试经验，创建**完整的、可发布的** claw-service-hub skill
 
 ---
 
