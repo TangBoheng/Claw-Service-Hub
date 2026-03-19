@@ -1,16 +1,27 @@
 # 🛠️ Tool Service Hub
 
-服务撮合云端 - OpenClaw 工具服务发现与调用平台
+[English](#english) | [中文](#中文)
 
-## 架构
+---
+
+## English
+
+### Overview
+
+**Tool Service Hub** is a service orchestration platform for OpenClaw that enables:
+
+- **Service Registration**: Publish local capabilities as discoverable services
+- **Service Discovery**: Find and use services published by other agents
+- **Service Invocation**: Call remote services via WebSocket
+
+### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      云端服务撮合平台                         │
+│                    Tool Service Hub                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ Service     │  │  Tunnel     │  │ Rating      │         │
-│  │ Registry    │  │  Manager    │  │ Manager     │         │
-│  │ (内存Map)    │  │  (WS Server)│  │ (评分存储)  │         │
+│  │  Service    │  │   Tunnel    │  │   Rating    │         │
+│  │  Registry   │  │   Manager   │  │   Manager   │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
 │                         │                                    │
 │                    WebSocket :8765                          │
@@ -18,165 +29,282 @@
            ▲                ▲                 ▲
            │                │                 │
     ┌──────┴──────┐  ┌──────┴──────┐   ┌──────┴──────┐
-    │ OpenClaw   │  │ OpenClaw   │   │ OpenClaw   │
-    │ 节点 A     │  │ 节点 B     │   │ 节点 C     │
-    │ (工具服务) │  │ (工具服务) │   │ (工具服务) │
+    │  Provider   │  │  Provider   │   │  Provider   │
+    │ (subagent1) │  │ (subagent2) │   │ (subagent3) │
+    │ (Data Svc)  │  │ (Workflow)  │   │ (API Svc)   │
     └────────────┘  └────────────┘   └────────────┘
 ```
 
-## 快速开始
+### Quick Start
 
-### 1. 安装依赖
+#### 1. Install Dependencies
 
 ```bash
 pip install websockets aiohttp
 ```
 
-### 2. 启动云端服务器
+#### 2. Start Hub Server
 
 ```bash
-cd tool-service-hub
+cd Claw-Service-Hub
 python -m server.main
 ```
 
-服务器会监听 `ws://localhost:8765`
+Server listens on `ws://localhost:8765`
 
-### 3. 启动一个工具服务 (客户端)
+#### 3. As a Provider - Register Your Service
 
-```bash
-cd tool-service-hub/client
-python example.py
+```python
+import asyncio
+import sys
+sys.path.insert(0, '.')
+from client.client import LocalServiceRunner
+
+async def my_handler(**params):
+    return {"result": "Hello from service!"}
+
+async def main():
+    runner = LocalServiceRunner(
+        name="my-service",
+        description="My awesome service",
+        hub_url="ws://localhost:8765"
+    )
+    runner.register_handler("my_method", my_handler)
+    await runner.run()
+
+asyncio.run(main())
 ```
 
-## 项目结构
+#### 4. As a Consumer - Discover and Call Services
+
+```python
+import asyncio
+import sys
+sys.path.insert(0, '.')
+from client.skill_client import SkillQueryClient
+
+async def main():
+    client = SkillQueryClient("ws://localhost:8765")
+    await client.connect()
+    
+    # Discover services
+    services = await client.discover()
+    print(f"Found {len(services)} services")
+    
+    # Call a service
+    result = await client.call_service(
+        service_id="service-skill-id",
+        method="my_method",
+        params={"key": "value"}
+    )
+    print(result)
+    
+    await client.disconnect()
+
+asyncio.run(main())
+```
+
+### Project Structure
 
 ```
-tool-service-hub/
-├── server/
-│   ├── main.py       # WebSocket 服务器入口
-│   ├── registry.py   # 服务注册与发现
-│   ├── tunnel.py     # 隧道管理
-│   └── rating.py    # 评分系统
+Claw-Service-Hub/
 ├── client/
-│   ├── client.py    # 客户端库
-│   └── example.py   # 使用示例
-├── test.py           # 单元测试
-└── requirements.txt
+│   ├── client.py           # LocalServiceRunner, ToolServiceClient
+│   ├── skill_client.py     # SkillQueryClient, SkillConsumer
+│   └── management_client.py # ManagementOnlyClient
+├── server/
+│   └── main.py             # Hub Server (WebSocket + REST API)
+├── skills/
+│   └── hub-client/
+│       └── SKILL.md        # Complete skill documentation
+└── README.md
 ```
 
-## 核心模块
+### Skill Documentation
 
-### ServiceRegistry (服务注册)
+See [skills/hub-client/SKILL.md](./skills/hub-client/SKILL.md) for complete usage guide including:
 
-类似 OpenClaw skill 的快速发现机制：
-- 节点启动时主动注册服务元数据
-- 支持按名称、标签、状态过滤查找
-- 心跳保活，自动清理离线服务
+- Provider/Consumer templates
+- Common data source examples (file, API, weather)
+- Troubleshooting guide
+- Environment configuration
 
-### TunnelManager (隧道管理)
+### Features
 
-- WebSocket 长连
-- 请求转发：云端 → 节点
-- 响应回传：节点 → 云端
+| Feature | Status |
+|---------|--------|
+| Service Registration | ✅ |
+| Service Discovery (by name/tag) | ✅ |
+| Heartbeat/Keep-alive | ✅ |
+| WebSocket Tunnel | ✅ |
+| Rating System (1-10) | ✅ |
+| REST API | ✅ |
 
-### RatingManager (评分系统)
+---
 
-- 1-10 分制
-- 评价标签：["fast", "accurate", "reliable"]
-- 统计：平均分、标签聚合
+## 中文
 
-## 消息协议
+### 概述
 
-### 客户端 → 云端
+**Tool Service Hub** 是 OpenClaw 的服务撮合平台，实现：
 
-```json
-// 注册服务
-{
-  "type": "register",
-  "service": {
-    "name": "csv-processor",
-    "description": "处理CSV数据",
-    "version": "1.0.0",
-    "endpoint": "http://localhost:8080",
-    "tags": ["data", "csv"]
-  }
-}
+- **服务注册**：将本地能力发布为可发现的服务
+- **服务发现**：查找并使用其他 agent 发布的服务
+- **服务调用**：通过 WebSocket 调用远程服务
 
-// 心跳
-{
-  "type": "heartbeat",
-  "service_id": "xxx"
-}
+### 架构图
 
-// 请求响应
-{
-  "type": "response",
-  "request_id": "xxx",
-  "response": {"result": "..."}
-}
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Tool Service Hub 服务中心                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │  服务注册   │  │  隧道管理   │  │  评分系统   │         │
+│  │  Registry   │  │  Manager    │  │  Manager    │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│                         │                                    │
+│                    WebSocket :8765                          │
+└─────────────────────────────────────────────────────────────┘
+           ▲                ▲                 ▲
+           │                │                 │
+    ┌──────┴──────┐  ┌──────┴──────┐   ┌──────┴──────┐
+    │  Provider   │  │  Provider   │   │  Provider   │
+    │ (subagent1) │  │ (subagent2) │   │ (subagent3) │
+    │ (数据服务)  │  │ (工作流)    │   │ (API服务)   │
+    └────────────┘  └────────────┘   └────────────┘
 ```
 
-### 云端 → 客户端
+### 快速开始
 
-```json
-// 注册确认
-{
-  "type": "registered",
-  "service_id": "xxx",
-  "tunnel_id": "xxx",
-  "status": "online"
-}
-
-// 远程请求
-{
-  "type": "request",
-  "request_id": "xxx",
-  "method": "process_csv",
-  "params": {"filename": "data.csv"}
-}
-
-// 服务列表更新
-{
-  "type": "service_list",
-  "services": [...]
-}
-```
-
-## REST API (可选)
-
-启动服务器后，可选使用 REST API：
+#### 1. 安装依赖
 
 ```bash
-# 列出所有服务
-curl http://localhost:8765/api/services
-
-# 获取服务评分
-curl http://localhost:8765/api/services/{service_id}/ratings
-
-# 提交评分
-curl -X POST http://localhost:8765/api/ratings \
-  -H "Content-Type: application/json" \
-  -d '{"service_id": "xxx", "score": 9, "comment": "很好用"}'
-
-# 列出隧道
-curl http://localhost:8765/api/tunnels
+pip install websockets aiohttp
 ```
 
-## Phase 1 功能清单
+#### 2. 启动 Hub 服务器
+
+```bash
+cd Claw-Service-Hub
+python -m server.main
+```
+
+服务器监听 `ws://localhost:8765`
+
+#### 3. 作为 Provider - 注册服务
+
+```python
+import asyncio
+import sys
+sys.path.insert(0, '.')
+from client.client import LocalServiceRunner
+
+async def my_handler(**params):
+    return {"result": "你好，来自服务！"}
+
+async def main():
+    runner = LocalServiceRunner(
+        name="my-service",
+        description="我的服务",
+        hub_url="ws://localhost:8765"
+    )
+    runner.register_handler("my_method", my_handler)
+    await runner.run()
+
+asyncio.run(main())
+```
+
+#### 4. 作为 Consumer - 发现并调用服务
+
+```python
+import asyncio
+import sys
+sys.path.insert(0, '.')
+from client.skill_client import SkillQueryClient
+
+async def main():
+    client = SkillQueryClient("ws://localhost:8765")
+    await client.connect()
+    
+    # 发现服务
+    services = await client.discover()
+    print(f"发现 {len(services)} 个服务")
+    
+    # 调用服务
+    result = await client.call_service(
+        service_id="服务ID",
+        method="方法名",
+        params={"参数": "值"}
+    )
+    print(result)
+    
+    await client.disconnect()
+
+asyncio.run(main())
+```
+
+### 项目结构
+
+```
+Claw-Service-Hub/
+├── client/
+│   ├── client.py           # LocalServiceRunner, ToolServiceClient
+│   ├── skill_client.py      # SkillQueryClient, SkillConsumer
+│   └── management_client.py # ManagementOnlyClient
+├── server/
+│   └── main.py              # Hub 服务器 (WebSocket + REST API)
+├── skills/
+│   └── hub-client/
+│       └── SKILL.md        # 完整的 Skill 使用文档
+└── README.md
+```
+
+### Skill 完整文档
+
+详见 [skills/hub-client/SKILL.md](./skills/hub-client/SKILL.md)，包含：
+
+- Provider/Consumer 完整模板
+- 常见数据源示例（文件、API、天气）
+- 故障排查指南
+- 环境配置说明
+
+### 功能列表
 
 | 功能 | 状态 |
 |------|------|
 | 服务注册 | ✅ |
-| 服务发现 (名称/标签) | ✅ |
+| 服务发现（按名称/标签） | ✅ |
 | 心跳保活 | ✅ |
 | WebSocket 隧道 | ✅ |
-| 1-10 分评分 | ✅ |
-| REST API | 🔄 可选 |
+| 评分系统 (1-10分) | ✅ |
+| REST API | ✅ |
 
-## TODO (Phase 2+)
+### 使用示例
 
-- [ ] 服务发现 HTTP API 完整实现
-- [ ] 评分持久化 (文件/数据库)
-- [ ] 服务调用代理 (通过云端调用其他节点服务)
-- [ ] 认证与授权
-- [ ] 流量统计与监控
+**场景**：每日穿衣推荐 + NG 图片推荐
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
+│ weather-service │────▶│   Hub (WS:8765)  │◀────│ ng-image-service    │
+│  (天气服务)     │     │   (服务中心)      │     │  (NG图片服务)        │
+└─────────────────┘     └──────────────────┘     └─────────────────────┘
+                               ▲
+                               │
+                        ┌──────┴──────┐
+                        │  Consumer   │
+                        │  (工作流)   │
+                        └─────────────┘
+```
+
+**结果**：
+```
+📍 Shanghai | 15°C | 阴
+👔 穿衣建议：温度适中，建议穿长袖衬衫或薄外套
+🎨 今日搭配灵感: 时尚春季穿搭
+```
+
+---
+
+## 🔗 Links
+
+- [GitHub](https://github.com/TangBoheng/Claw-Service-Hub)
+- [OpenClaw](https://github.com/openclaw/openclaw)
