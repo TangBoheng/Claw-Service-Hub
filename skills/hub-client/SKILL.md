@@ -400,3 +400,112 @@ Claw-Service-Hub/
 2. Provider: 运行 `python your_service.py` 注册服务
 3. Consumer: 连接 Hub 发现服务
 4. Consumer: 调用服务获取结果
+
+---
+
+## 十、Key 授权机制 (可选)
+
+### 10.1 概述
+
+可选的 Key 授权机制，用于控制服务的访问权限。
+
+**功能**：
+- 时间维度：Key 有效期（支持 Provider 自定义）
+- 次数维度：最大调用次数（支持 Provider 自定义）
+- 双验证：Provider 自主管理 + Hub 验证
+
+### 10.2 Provider 端 - 设置生命周期策略
+
+```python
+from client.client import LocalServiceRunner
+
+runner = LocalServiceRunner("my-service", "我的服务", "ws://localhost:8765")
+
+# 设置默认生命周期策略
+runner.set_lifecycle_policy(
+    duration_seconds=3600,  # 默认1小时有效
+    max_calls=100           # 默认100次调用
+)
+
+# 设置自定义策略（可选）
+runner.set_custom_policy(
+    condition="premium",     # 策略名称
+    duration_seconds=86400,  # 24小时
+    max_calls=1000           # 1000次
+)
+
+runner.register_handler("method", handler)
+await runner.run()
+```
+
+### 10.3 Consumer 端 - 请求 Key 并调用
+
+```python
+from client.skill_client import SkillQueryClient
+
+async def main():
+    client = SkillQueryClient("ws://localhost:8765")
+    await client.connect()
+    
+    # 1. 请求 Key
+    key_info = await client.request_key(
+        service_id="svc_xxx",
+        purpose="日常天气查询"
+    )
+    
+    if key_info.get("success"):
+        print(f"Key: {key_info['key']}")
+        print(f"有效至: {key_info['lifecycle']['expires_at']}")
+        print(f"剩余次数: {key_info['lifecycle']['remaining_calls']}")
+    
+    # 2. 用 Key 调用服务（自动带 Key）
+    result = await client.call_service(
+        service_id="svc_xxx",
+        method="get_weather",
+        params={"city": "Shanghai"}
+    )
+    
+    print(result)
+    await client.disconnect()
+
+asyncio.run(main())
+```
+
+### 10.4 消息协议
+
+| 消息类型 | 方向 | 说明 |
+|---------|------|------|
+| lifecycle_policy | Provider→Hub | 注册生命周期策略 |
+| key_request | Consumer→Hub→Provider | 请求 Key |
+| key_response | Provider→Hub→Consumer | 返回 Key（批准/拒绝） |
+| key_revoke | Provider→Hub | 撤销 Key |
+| call_service (带 key) | Consumer→Hub | 带 Key 调用服务 |
+
+### 10.5 生命周期参数
+
+```python
+# Provider 注册策略
+{
+    "duration_seconds": 3600,    # 有效时长（秒）
+    "max_calls": 100,             # 最大调用次数
+    "custom_policies": {         # 可选：自定义策略
+        "premium": {
+            "duration_seconds": 86400,
+            "max_calls": 1000
+        }
+    }
+}
+
+# Key 验证结果
+{
+    "valid": True,
+    "key": "key_abc123...",
+    "lifecycle": {
+        "expires_at": "2026-03-20T03:47:00Z",
+        "max_calls": 100,
+        "call_count": 5,
+        "remaining_calls": 95,
+        "remaining_time": 3200
+    }
+}
+```

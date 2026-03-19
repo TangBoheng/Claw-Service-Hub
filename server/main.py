@@ -25,11 +25,13 @@ try:
     from server.registry import ServiceRegistry, ToolService, get_registry
     from server.tunnel import TunnelManager, get_tunnel_manager
     from server.rating import RatingManager, get_rating_manager
+    from server.key_manager import key_manager, KeyManager
 except ImportError:
     # 备用: 直接导入 (当 PYTHONPATH 正确设置时)
     from registry import ServiceRegistry, ToolService, get_registry
     from tunnel import TunnelManager, get_tunnel_manager
     from rating import RatingManager, get_rating_manager
+    from key_manager import key_manager, KeyManager
 
 
 # 新增：导入管理客户端和通道管理
@@ -201,6 +203,27 @@ class HubServer:
 
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))
+            
+            # === Key 授权相关 ===
+            elif msg_type == "lifecycle_policy":
+                # Provider 注册生命周期策略
+                await self._handle_lifecycle_policy(client_id, message)
+            
+            elif msg_type == "key_request":
+                # Consumer 请求 Key
+                await self._handle_key_request(websocket, client_id, message)
+            
+            elif msg_type == "key_response":
+                # Provider 返回 Key（批准/拒绝）
+                await self._handle_key_response(websocket, client_id, message)
+            
+            elif msg_type == "key_revoke":
+                # Provider 撤销 Key
+                await self._handle_key_revoke(client_id, message)
+            
+            elif msg_type == "key_list":
+                # 查询 Key 列表
+                await self._handle_key_list(websocket, client_id, message)
             
             else:
                 print(f"[Server] Unknown message type: {msg_type}")
@@ -652,6 +675,145 @@ class HubServer:
         )
         return web.json_response(rating.to_dict())
 
+
+
+    # ========== Key 授权处理函数 ==========
+    
+    async def _handle_lifecycle_policy(self, client_id: str, message: dict):
+        """处理 Provider 注册生命周期策略"""
+        service_id = message.get("service_id")
+        policy = message.get("policy", {})
+        
+        if not service_id:
+            print(f"[Server] lifecycle_policy: 缺少 service_id")
+            return
+        
+        # 注册策略
+        key_manager.register_policy(service_id, policy)
+        
+        print(f"[Server] 注册生命周期策略: {service_id}, {policy}")
+    
+    async def _handle_key_request(self, websocket, client_id: str, message: dict):
+        """处理 Consumer 请求 Key"""
+        service_id = message.get("service_id")
+        purpose = message.get("purpose", "")
+        
+        if not service_id:
+            await websocket.send(json.dumps({
+                "type": "key_request_response",
+                "success": False,
+                "reason": "缺少 service_id"
+            }))
+            return
+        
+        # 查找服务提供者
+        service = self.registry.get_service(service_id)
+        if not service:
+            await websocket.send(json.dumps({
+                "type": "key_request_response",
+                "success": False,
+                "reason": "服务不存在"
+            }))
+            return
+        
+        # 转发请求给 Provider
+        provider_client_id = service.client_id
+        provider_ws = self._client_websockets.get(provider_client_id)
+        
+        if not provider_ws:
+            await websocket.send(json.dumps({
+                "type": "key_request_response",
+                "success": False,
+                "reason": "服务提供者离线"
+            }))
+            return
+        
+        # 构造转发请求
+        forward_msg = {
+            "type": "key_request",
+            "request_id": f"req_{uuid.uuid4().hex[:8]}",
+            "service_id": service_id,
+            "consumer_id": client_id,
+            "purpose": purpose,
+            "service_name": service.name
+        }
+        
+        await provider_ws.send(json.dumps(forward_msg))
+        print(f"[Server] 转发 Key 请求: {client_id} -> {provider_client_id}")
+    
+    async def _handle_key_response(self, websocket, client_id: str, message: dict):
+        """处理 Provider 返回 Key（批准/拒绝）"""
+        request_id = message.get("request_id")
+        approved = message.get("approved", False)
+        
+        if not approved:
+            # 拒绝 - 通知 Consumer
+            for ws in self._client_websockets.values():
+                try:
+                    await ws.send(json.dumps({
+                        "type": "key_request_response",
+                        "request_id": request_id,
+                        "success": False,
+                        "reason": message.get("reason", "Provider 拒绝")
+                    }))
+                except:
+                    pass
+            return
+        
+        # 批准 - 生成 Key 并存储
+        service_id = message.get("service_id")
+        consumer_id = message.get("consumer_id")
+        lifecycle = message.get("lifecycle", {})
+        
+        # 生成 Key
+        key = key_manager.generate_key(
+            service_id=service_id,
+            consumer_id=consumer_id,
+            duration_seconds=lifecycle.get("duration_seconds"),
+            max_calls=lifecycle.get("max_calls")
+        )
+        
+        key_info = key_manager.get_key_info(key)
+        
+        # 通知 Consumer
+        for ws in self._client_websockets.values():
+            try:
+                await ws.send(json.dumps({
+                    "type": "key_request_response",
+                    "request_id": request_id,
+                    "success": True,
+                    "key": key,
+                    "lifecycle": key_info
+                }))
+            except:
+                pass
+        
+        print(f"[Server] Key 已生成: {key[:12]}... 服务:{service_id} 消费者:{consumer_id}")
+    
+    async def _handle_key_revoke(self, client_id: str, message: dict):
+        """处理撤销 Key"""
+        key = message.get("key")
+        if key:
+            key_manager.revoke_key(key)
+            print(f"[Server] Key 已撤销: {key[:12]}...")
+    
+    async def _handle_key_list(self, websocket, client_id: str, message: dict):
+        """处理查询 Key 列表"""
+        service_id = message.get("service_id")
+        
+        keys = key_manager.list_keys(service_id=service_id, active_only=True)
+        
+        await websocket.send(json.dumps({
+            "type": "key_list_response",
+            "keys": keys
+        }))
+    
+    def _verify_key_for_call(self, service_id: str, key: str = None) -> dict:
+        """验证 Key（用于 call_service 前）"""
+        if not key:
+            return {"valid": False, "reason": "需要 Key"}
+        
+        return key_manager.verify_key(key, service_id)
 
 
 def main():
