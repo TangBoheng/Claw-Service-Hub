@@ -60,6 +60,7 @@ class HubServer:
 
         # 注册隧道转发回调
         self._client_websockets: Dict[str, ServerConnection] = {}
+        self._key_request_map: Dict[str, str] = {}  # forward_request_id -> original_request_id
         self._client_info: Dict[str, dict] = {}  # client_id -> {type, service_id}
         self._pending_channels: Dict[str, dict] = {}  # request_id -> channel_request
         self.tunnel_mgr.on("request", self._on_tunnel_request)
@@ -211,6 +212,7 @@ class HubServer:
             
             elif msg_type == "key_request":
                 # Consumer 请求 Key
+                print(f"[Server] DEBUG: Dispatching key_request to handler", flush=True)
                 await self._handle_key_request(websocket, client_id, message)
             
             elif msg_type == "key_response":
@@ -542,10 +544,40 @@ class HubServer:
         request_id = message.get("request_id")
         method = message.get("method")
         params = message.get("params", {})
+        key = message.get("key")  # 可选：Key 验证
 
         if not tunnel_id or not request_id:
             print(f"[Server] Invalid call_service message: {message}")
             return
+
+        # 如果提供了 Key，验证 Key
+        if key:
+            # 获取 service_id (从 tunnel 获取)
+            service_id = None
+            for svc in self.registry.list_all():
+                if svc.tunnel_id == tunnel_id:
+                    service_id = svc.id
+                    break
+            
+            if service_id:
+                result = key_manager.verify_key(key, service_id)
+                if not result.get("valid"):
+                    # Key 无效，拒绝调用
+                    for ws in self._client_websockets.values():
+                        try:
+                            await ws.send(json.dumps({
+                                "type": "service_response",
+                                "request_id": request_id,
+                                "response": {"error": f"Key验证失败: {result.get('reason')}"}
+                            }))
+                        except:
+                            pass
+                    print(f"[Server] Key验证失败: {result.get('reason')}")
+                    return
+                
+                # Key 有效，扣减次数
+                key_manager.use_key(key)
+                print(f"[Server] Key验证成功，剩余次数: {key_manager.get_key_info(key).get('remaining_calls')}")
 
         # 通过 tunnel manager 转发请求
         success = await self.tunnel_mgr.forward_request(
@@ -695,30 +727,61 @@ class HubServer:
     
     async def _handle_key_request(self, websocket, client_id: str, message: dict):
         """处理 Consumer 请求 Key"""
-        service_id = message.get("service_id")
-        purpose = message.get("purpose", "")
-        
-        if not service_id:
-            await websocket.send(json.dumps({
-                "type": "key_request_response",
-                "success": False,
-                "reason": "缺少 service_id"
-            }))
-            return
-        
-        # 查找服务提供者
-        service = self.registry.get_service(service_id)
-        if not service:
-            await websocket.send(json.dumps({
-                "type": "key_request_response",
-                "success": False,
-                "reason": "服务不存在"
-            }))
-            return
-        
-        # 转发请求给 Provider
-        provider_client_id = service.client_id
-        provider_ws = self._client_websockets.get(provider_client_id)
+        try:
+            print(f"[Server] _handle_key_request: {message}")
+            
+            service_id = message.get("service_id")
+            purpose = message.get("purpose", "")
+            
+            print(f"[Server] Looking for service: {service_id}")
+            print(f"[Server] Registry services: {[s.id for s in self.registry.list_all()]}")
+            
+            if not service_id:
+                await websocket.send(json.dumps({
+                    "type": "key_request_response",
+                    "success": False,
+                    "reason": "缺少 service_id"
+                }))
+                return
+            
+            # 查找服务提供者
+            service = self.registry.get(service_id)
+            if not service:
+                await websocket.send(json.dumps({
+                    "type": "key_request_response",
+                    "success": False,
+                    "reason": "服务不存在"
+                }))
+                return
+            
+            # 转发请求给 Provider
+            provider_client_id = service.provider_client_id
+            provider_ws = self._client_websockets.get(provider_client_id)
+            
+            if not provider_ws:
+                await websocket.send(json.dumps({
+                    "type": "key_request_response",
+                    "success": False,
+                    "reason": "服务提供者离线"
+                }))
+                return
+            
+            # 构造转发请求
+            forward_msg = {
+                "type": "key_request",
+                "request_id": f"req_{uuid.uuid4().hex[:8]}",
+                "service_id": service_id,
+                "consumer_id": client_id,
+                "purpose": purpose,
+                "service_name": service.name
+            }
+            
+            await provider_ws.send(json.dumps(forward_msg))
+            print(f"[Server] 转发 Key 请求: {client_id} -> {provider_client_id}")
+        except Exception as e:
+            print(f"[Server] ERROR in _handle_key_request: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
         
         if not provider_ws:
             await websocket.send(json.dumps({
@@ -729,9 +792,16 @@ class HubServer:
             return
         
         # 构造转发请求
+        original_request_id = message.get("request_id")  # 保留原始 request_id
+        forward_request_id = f"req_{uuid.uuid4().hex[:8]}"
+        
+        # 保存 request_id 映射
+        self._key_request_map[forward_request_id] = original_request_id
+        
         forward_msg = {
             "type": "key_request",
-            "request_id": f"req_{uuid.uuid4().hex[:8]}",
+            "request_id": forward_request_id,
+            "original_request_id": original_request_id,  # 传递给 Provider
             "service_id": service_id,
             "consumer_id": client_id,
             "purpose": purpose,
@@ -739,11 +809,13 @@ class HubServer:
         }
         
         await provider_ws.send(json.dumps(forward_msg))
-        print(f"[Server] 转发 Key 请求: {client_id} -> {provider_client_id}")
+        print(f"[Server] 转发 Key 请求: {client_id} -> {provider_client_id}, request_id: {forward_request_id}")
     
     async def _handle_key_response(self, websocket, client_id: str, message: dict):
         """处理 Provider 返回 Key（批准/拒绝）"""
-        request_id = message.get("request_id")
+        forward_request_id = message.get("request_id")
+        original_request_id = self._key_request_map.get(forward_request_id, forward_request_id)
+        
         approved = message.get("approved", False)
         
         if not approved:
@@ -752,7 +824,7 @@ class HubServer:
                 try:
                     await ws.send(json.dumps({
                         "type": "key_request_response",
-                        "request_id": request_id,
+                        "request_id": original_request_id,
                         "success": False,
                         "reason": message.get("reason", "Provider 拒绝")
                     }))
@@ -780,7 +852,7 @@ class HubServer:
             try:
                 await ws.send(json.dumps({
                     "type": "key_request_response",
-                    "request_id": request_id,
+                    "request_id": original_request_id,
                     "success": True,
                     "key": key,
                     "lifecycle": key_info

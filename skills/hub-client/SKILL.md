@@ -343,6 +343,25 @@ async def right(**params):  # 正确
     return {"result": "value"}
 ```
 
+### 问题 6: 返回值被包装在 'result' 中
+
+**现象**: 调用服务后返回 `{'result': {'actual_data': '...'}}`
+
+**说明**: Hub 会将 handler 返回的 dict 包装在 'result' 字段中
+
+**解决**: 直接使用返回值，或根据需要提取
+```python
+result = await client.call_service(service_id, "method", params)
+# result = {'result': {'temp': 25, 'city': 'Beijing'}}
+
+# 方式1: 直接使用（推荐）
+data = result  # 已经是解包后的数据
+
+# 方式2: 如果需要明确提取
+if 'result' in result:
+    data = result['result']
+```
+
 ---
 
 ## 七、最小示例
@@ -419,7 +438,12 @@ Claw-Service-Hub/
 ```python
 from client.client import LocalServiceRunner
 
-runner = LocalServiceRunner("my-service", "我的服务", "ws://localhost:8765")
+# 创建服务
+runner = LocalServiceRunner(
+    name="my-protected-service",
+    description="需要授权的服务",
+    hub_url=os.getenv("HUB_WS_URL", "ws://localhost:8765")
+)
 
 # 设置默认生命周期策略
 runner.set_lifecycle_policy(
@@ -434,7 +458,14 @@ runner.set_custom_policy(
     max_calls=1000           # 1000次
 )
 
-runner.register_handler("method", handler)
+# 注册方法
+async def get_data(**params):
+    return {"data": "secret data"}
+
+runner.register_handler("get_data", get_data)
+
+# 启动服务
+print(f"🚀 启动授权服务...")
 await runner.run()
 ```
 
@@ -444,34 +475,81 @@ await runner.run()
 from client.skill_client import SkillQueryClient
 
 async def main():
-    client = SkillQueryClient("ws://localhost:8765")
+    client = SkillQueryClient(
+        hub_url=os.getenv("HUB_WS_URL", "ws://localhost:8765")
+    )
     await client.connect()
     
-    # 1. 请求 Key
+    # 发现服务
+    services = await client.discover()
+    target = next((s for s in services if "protected" in s.get("name", "")), None)
+    
+    if not target:
+        print("未找到服务")
+        return
+    
+    service_id = target.get("skill_id")
+    
+    # 方法1: 直接调用（如果服务不需要 Key）
+    # result = await client.call_service(service_id, "get_data", {})
+    
+    # 方法2: 先请求 Key，再调用（推荐）
     key_info = await client.request_key(
-        service_id="svc_xxx",
-        purpose="日常天气查询"
+        service_id=service_id,
+        purpose="日常数据查询"
     )
     
     if key_info.get("success"):
-        print(f"Key: {key_info['key']}")
-        print(f"有效至: {key_info['lifecycle']['expires_at']}")
-        print(f"剩余次数: {key_info['lifecycle']['remaining_calls']}")
+        key = key_info["key"]
+        lifecycle = key_info["lifecycle"]
+        
+        print(f"✅ Key 获取成功")
+        print(f"   Key: {key[:20]}...")
+        print(f"   有效期: {lifecycle.get('remaining_time')} 秒")
+        print(f"   剩余次数: {lifecycle.get('remaining_calls')} 次")
+        
+        # 用 Key 调用服务
+        result = await client.call_service(
+            service_id=service_id,
+            method="get_data",
+            params={},
+            key=key  # 携带 Key
+        )
+        
+        print(f"📥 结果: {result}")
+    else:
+        print(f"❌ Key 获取失败: {key_info.get('reason')}")
     
-    # 2. 用 Key 调用服务（自动带 Key）
-    result = await client.call_service(
-        service_id="svc_xxx",
-        method="get_weather",
-        params={"city": "Shanghai"}
-    )
-    
-    print(result)
     await client.disconnect()
 
 asyncio.run(main())
 ```
 
-### 10.4 消息协议
+### 10.4 Key 验证失败的处理
+
+```python
+async def call_with_fallback(client, service_id, method, params):
+    """带自动重试的调用"""
+    
+    # 先尝试不带 Key
+    result = await client.call_service(service_id, method, params)
+    
+    # 检查是否需要 Key
+    if result.get("error") and "Key" in result.get("error", ""):
+        print("需要 Key，请求授权...")
+        
+        key_info = await client.request_key(service_id, "自动申请")
+        if key_info.get("success"):
+            key = key_info["key"]
+            # 重试带 Key
+            result = await client.call_service(
+                service_id, method, params, key=key
+            )
+    
+    return result
+```
+
+### 10.5 消息协议
 
 | 消息类型 | 方向 | 说明 |
 |---------|------|------|
@@ -481,7 +559,7 @@ asyncio.run(main())
 | key_revoke | Provider→Hub | 撤销 Key |
 | call_service (带 key) | Consumer→Hub | 带 Key 调用服务 |
 
-### 10.5 生命周期参数
+### 10.6 生命周期参数
 
 ```python
 # Provider 注册策略
@@ -509,3 +587,16 @@ asyncio.run(main())
     }
 }
 ```
+
+### 10.7 subagent 使用建议
+
+**对于 Provider（服务发布者）**：
+1. 如果服务需要授权，在 `set_lifecycle_policy` 设置合理的限制
+2. 建议默认 `max_calls=100`, `duration_seconds=3600`
+3. 可以为不同 consumer 设置不同策略
+
+**对于 Consumer（服务调用者）**：
+1. 先尝试直接调用，如果失败再申请 Key
+2. 保存 Key 避免重复申请
+3. 检查 `lifecycle.get('remaining_calls')` 避免次数用尽
+4. 注意 `lifecycle.get('remaining_time')` 及时续期

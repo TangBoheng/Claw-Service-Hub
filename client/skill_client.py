@@ -134,6 +134,10 @@ class SkillQueryClient:
             elif msg_type == "error":
                 # 错误响应
                 self._resolve_future(request_id, {"error": message.get("message", "Unknown error")})
+            
+            elif msg_type == "key_request_response":
+                # Key 请求响应
+                self._resolve_future(request_id, message)
 
             elif msg_type == "ping":
                 await self.websocket.send(json.dumps({"type": "pong"}))
@@ -281,6 +285,7 @@ class SkillQueryClient:
         service_id: str,
         method: str,
         params: dict = None,
+        key: str = None,
         timeout: float = 60.0
     ) -> dict:
         """
@@ -290,6 +295,7 @@ class SkillQueryClient:
             service_id: 服务ID（会自动使用已建立的通道）
             method: 调用方法名
             params: 方法参数
+            key: 可选的访问 Key
             timeout: 超时时间
 
         Returns:
@@ -309,12 +315,16 @@ class SkillQueryClient:
             return {"error": "Failed to get tunnel_id"}
 
         # 发送服务调用请求
-        result = await self._send_request("call_service", {
+        payload = {
             "service_id": service_id,
             "tunnel_id": tunnel_id,
             "method": method,
             "params": params or {}
-        }, timeout=timeout)
+        }
+        if key:
+            payload["key"] = key
+        
+        result = await self._send_request("call_service", payload, timeout=timeout)
 
         return result
 
@@ -351,6 +361,53 @@ class SkillQueryClient:
         }, timeout=timeout)
 
         return result
+
+    async def request_key(
+        self,
+        service_id: str,
+        purpose: str = ""
+    ) -> dict:
+        """
+        请求服务的访问 Key
+        
+        Args:
+            service_id: 服务ID
+            purpose: 用途说明
+            
+        Returns:
+            {"success": True, "key": "...", "lifecycle": {...}}
+            或 {"success": False, "reason": "..."}
+        """
+        print(f"[SkillClient] request_key: service_id={service_id}, purpose={purpose}")
+        
+        # 发送 key_request 消息
+        result = await self._send_request("key_request", {
+            "service_id": service_id,
+            "purpose": purpose
+        }, timeout=30.0)
+        
+        print(f"[SkillClient] request_key result: {result}")
+        
+        # 如果成功，存储 key
+        if result.get("success") and result.get("key"):
+            if not hasattr(self, '_keys'):
+                self._keys = {}
+            self._keys[service_id] = result["key"]
+            result["lifecycle"] = result.get("lifecycle", {})
+        
+        return result
+    
+    def get_stored_key(self, service_id: str) -> str:
+        """获取已存储的 Key"""
+        if hasattr(self, '_keys'):
+            return self._keys.get(service_id)
+        return None
+    
+    def store_key(self, service_id: str, key: str):
+        """存储 Key"""
+        if not hasattr(self, '_keys'):
+            self._keys = {}
+        self._keys[service_id] = key
 
 
 class SkillConsumer:

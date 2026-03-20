@@ -74,6 +74,8 @@ class ToolService:
         """返回 skill 风格描述符，用于 skill 方式查询"""
         return {
             "skill_id": self.id,
+            "id": self.id,  # 兼容字段
+            "service_id": self.id,  # 兼容字段
             "name": self.name,
             "description": self.description,
             "version": self.version,

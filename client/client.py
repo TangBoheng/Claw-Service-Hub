@@ -148,6 +148,18 @@ class ToolServiceClient:
                 self.service_id = message.get("service_id")
                 self.tunnel_id = message.get("tunnel_id")
                 print(f"[Client] Registered! service_id={self.service_id}, tunnel_id={self.tunnel_id}")
+                
+                # 注册确认后，发送生命周期策略
+                if hasattr(self, 'lifecycle_policy') and self.lifecycle_policy:
+                    policy_msg = {
+                        "type": "lifecycle_policy",
+                        "service_id": self.service_id,
+                        "policy": self.lifecycle_policy
+                    }
+                    if hasattr(self, 'custom_policies') and self.custom_policies:
+                        policy_msg["policy"]["custom_policies"] = self.custom_policies
+                    await self.websocket.send(json.dumps(policy_msg))
+                    print(f"[Client] 发送生命周期策略: {self.lifecycle_policy}")
             
             elif msg_type == "service_list":
                 # 服务列表更新（向后兼容）
@@ -174,6 +186,19 @@ class ToolServiceClient:
 
             elif msg_type == "ping":
                 await self.websocket.send(json.dumps({"type": "pong"}))
+            
+            elif msg_type == "key_request":
+                # Consumer 请求 Key
+                await self._handle_key_request(message)
+            
+            elif msg_type == "service_response":
+                # 服务响应 - 唤醒等待的请求
+                request_id = message.get("request_id")
+                response_data = message.get("response", {})
+                if request_id and request_id in self._response_futures:
+                    future = self._response_futures.pop(request_id)
+                    if not future.done():
+                        future.set_result(response_data)
             
             else:
                 print(f"[Client] Unknown message type: {msg_type}")
@@ -209,6 +234,37 @@ class ToolServiceClient:
             "request_id": request_id,
             "response": response
         }))
+    
+    async def _handle_key_request(self, message: dict):
+        """处理 Key 请求"""
+        request_id = message.get("request_id")
+        consumer_id = message.get("consumer_id")
+        service_id = message.get("service_id")
+        purpose = message.get("purpose", "")
+        
+        print(f"[Client] Key request from {consumer_id}: {purpose}")
+        
+        # 获取生命周期策略
+        policy = getattr(self, 'lifecycle_policy', None)
+        if not policy:
+            policy = {"duration_seconds": 3600, "max_calls": 100}
+        
+        # 批准请求，返回生命周期信息
+        response = {
+            "type": "key_response",
+            "request_id": request_id,
+            "approved": True,
+            "consumer_id": consumer_id,
+            "service_id": service_id,
+            "lifecycle": {
+                "duration_seconds": policy.get("duration_seconds", 3600),
+                "max_calls": policy.get("max_calls", 100)
+            },
+            "reason": "Approved"
+        }
+        
+        await self.websocket.send(json.dumps(response))
+        print(f"[Client] Key request approved for {consumer_id}")
     
     async def _heartbeat_loop(self):
         """心跳循环"""
@@ -308,6 +364,30 @@ class LocalServiceRunner:
             skill_dir=skill_dir,
             hub_url=hub_url
         )
+        # 生命周期策略
+        self.lifecycle_policy = None
+        self.custom_policies = {}
+    
+    def set_lifecycle_policy(self, duration_seconds: int = 3600, max_calls: int = 100):
+        """设置默认生命周期策略"""
+        self.lifecycle_policy = {
+            "duration_seconds": duration_seconds,
+            "max_calls": max_calls
+        }
+        # 传递给 client
+        self.client.lifecycle_policy = self.lifecycle_policy
+        self.client.custom_policies = self.custom_policies
+    
+    def set_custom_policy(self, condition: str, duration_seconds: int, max_calls: int):
+        """设置自定义策略"""
+        if not hasattr(self, 'custom_policies'):
+            self.custom_policies = {}
+        self.custom_policies[condition] = {
+            "duration_seconds": duration_seconds,
+            "max_calls": max_calls
+        }
+        if hasattr(self.client, 'custom_policies'):
+            self.client.custom_policies = self.custom_policies
     
     def register_handler(self, method: str, handler: Callable):
         """注册方法处理器"""
@@ -325,6 +405,9 @@ class LocalServiceRunner:
             "duration_seconds": duration_seconds,
             "max_calls": max_calls
         }
+        # 传递给底层 client
+        if hasattr(self, 'client'):
+            self.client.lifecycle_policy = self.lifecycle_policy
     
     def set_custom_policy(self, condition: str, duration_seconds: int, max_calls: int):
         """

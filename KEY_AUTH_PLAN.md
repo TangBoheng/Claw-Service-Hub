@@ -337,3 +337,33 @@ print(f"剩余次数: {key_info['lifecycle']['max_calls']}")
 # 调用服务
 result = await client.call_service("svc_xxx", "get_weather", {"city": "Shanghai"})
 ```
+---
+
+## 待完善问题
+
+### 问题 1: Provider 端未发送生命周期策略到 Hub
+
+**现状**: `set_lifecycle_policy` 只设置了本地变量，没有发送给 Hub
+
+**需要修改**:
+- LocalServiceRunner 在注册服务时，应发送 `lifecycle_policy` 消息到 Hub
+- Hub 收到后存储到 key_manager
+
+### 问题 2: Hub 未验证 Key
+
+**现状**: `call_service` 没有验证 Key
+
+**需要修改**:
+- Hub 收到 `call_service` 时，检查是否带 key
+- 如果带 key，验证 key 是否有效、是否在生命周期内
+- 无 key 或无效 key 返回错误
+
+### 问题 3: Consumer 端未实现 request_key
+
+**现状**: SkillQueryClient 没有 request_key 方法
+
+**需要修改**:
+- 添加 `request_key` 方法
+- 实现 Key 申请流程
+- 调用服务时自动附带 Key
+
