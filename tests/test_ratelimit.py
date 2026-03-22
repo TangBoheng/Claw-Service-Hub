@@ -169,9 +169,9 @@ class TestGetRateLimiter:
     def test_respects_custom_rate(self):
         """Test that custom rate is respected."""
         import server.ratelimit
-
         server.ratelimit._default_limiter = None
 
+        from server.ratelimit import get_rate_limiter
         limiter = get_rate_limiter(requests_per_minute=30)
 
         assert limiter.rate == pytest.approx(0.5, rel=0.1)
