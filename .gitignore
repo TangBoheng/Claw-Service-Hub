@@ -65,3 +65,7 @@ venv.bak/
 # Project specific
 *.log
 .cache/
+
+# Planning docs (internal)
+COMMERCIAL_PLAN.md
+STAR_PLAN.md

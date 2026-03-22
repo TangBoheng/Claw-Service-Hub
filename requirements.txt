@@ -10,3 +10,6 @@ pyyaml
 
 # UUID generation
 uuid
+
+# Logging
+structlog>=24.0.0

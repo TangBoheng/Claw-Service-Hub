@@ -1,4 +1,16 @@
-# 🛠️ Tool Service Hub
+# 🛠️ Claw Service Hub
+
+<p align="center">
+  <img src="docs/logo-text.svg" alt="Claw Service Hub Logo" width="400"/>
+</p>
+
+[![PyPI](https://img.shields.io/pypi/v/claw-service-hub)](https://pypi.org/project/claw-service-hub/)
+[![Python](https://img.shields.io/pypi/pyversions/claw-service-hub)](https://pypi.org/project/claw-service-hub/)
+[![License](https://img.shields.io/pypi/l/claw-service-hub)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/TangBoheng/Claw-Service-Hub)](https://github.com/TangBoheng/Claw-Service-Hub/stargazers)
+[![Discord](https://img.shields.io/discord/your-server-id)](https://discord.gg/your-server)
+
+> 🚀 OpenClaw 子代理服务撮合平台 — 让 AI Agent 之间的服务发现与调用像呼吸一样简单
 
 [English](#english) | [中文](#中文)
 
@@ -8,11 +20,18 @@
 
 ### Overview
 
-**Tool Service Hub** is a service orchestration platform for OpenClaw that enables:
+**Claw Service Hub** is a **service marketplace for AI Agents** — the backbone that makes sub-agents in OpenClaw discover, share, and collaborate on capabilities.
 
-- **Service Registration**: Publish local capabilities as discoverable services
-- **Service Discovery**: Find and use services published by other agents
-- **Service Invocation**: Call remote services via WebSocket
+#### Why Claw Service Hub?
+
+| Problem | Solution |
+|---------|----------|
+| Agent A has a weather skill, but Agent B can't find it | 🏪 **Service Registry** — One place to publish & discover |
+| Hardcoded tool integrations across agents | 🔌 **Loose Coupling** — Services talk via WebSocket |
+| No way to rate or trust remote services | ⭐ **Rating System** — Quality signals for services |
+| Complex multi-agent workflows | 🔄 **Tunnel Manager** — Automatic service tunneling |
+
+> **TL;DR**: Think of it as "npm for AI agents" — but instead of JavaScript packages, agents share **live capabilities**.
 
 ### Architecture
 
@@ -35,9 +54,16 @@
     └────────────┘  └────────────┘   └────────────┘
 ```
 
-### Quick Start
+### Quick Start (One-Liner)
 
-#### 1. Install Dependencies
+```bash
+# One command to start the Hub server
+pip install claw-service-hub && python -m server.main
+```
+
+#### Detailed Setup
+
+##### 1. Install Dependencies
 
 ```bash
 pip install websockets aiohttp
@@ -146,11 +172,18 @@ See [skills/hub-client/SKILL.md](./skills/hub-client/SKILL.md) for complete usag
 
 ### 概述
 
-**Tool Service Hub** 是 OpenClaw 的服务撮合平台，实现：
+**Claw Service Hub** 是 **AI Agent 的服务市场** — 让 OpenClaw 中的子代理能够发现、共享和协作。
 
-- **服务注册**：将本地能力发布为可发现的服务
-- **服务发现**：查找并使用其他 agent 发布的服务
-- **服务调用**：通过 WebSocket 调用远程服务
+#### 为什么选择 Claw Service Hub?
+
+| 痛点 | 解决方案 |
+|------|----------|
+| Agent A 有天气技能，但 Agent B 找不到 | 🏪 **服务注册中心** — 统一发布与发现 |
+| 跨代理的硬编码工具集成 | 🔌 **松耦合架构** — 通过 WebSocket 通信 |
+| 无法评估远程服务的可靠性 | ⭐ **评分系统** — 服务质量信号 |
+| 复杂的多代理工作流 | 🔄 **隧道管理器** — 自动服务隧道 |
+
+> **一句话**：把 Claw Service Hub 想象成 "AI 代理的 npm" — 不过共享的不是 JavaScript 包，而是**实时能力**。
 
 ### 架构图
 
@@ -173,9 +206,16 @@ See [skills/hub-client/SKILL.md](./skills/hub-client/SKILL.md) for complete usag
     └────────────┘  └────────────┘   └────────────┘
 ```
 
-### 快速开始
+### 快速开始（一行命令）
 
-#### 1. 安装依赖
+```bash
+# 一行命令启动 Hub 服务器
+pip install claw-service-hub && python -m server.main
+```
+
+#### 详细设置
+
+##### 1. 安装依赖
 
 ```bash
 pip install websockets aiohttp
@@ -306,5 +346,9 @@ Claw-Service-Hub/
 
 ## 🔗 Links
 
-- [GitHub](https://github.com/TangBoheng/Claw-Service-Hub)
-- [OpenClaw](https://github.com/openclaw/openclaw)
+- [📖 Documentation](https://claw-service-hub.readthedocs.io)
+- [💬 GitHub Discussions](https://github.com/TangBoheng/Claw-Service-Hub/discussions)
+- [🐛 Issue Tracker](https://github.com/TangBoheng/Claw-Service-Hub/issues)
+- [📦 PyPI Package](https://pypi.org/project/claw-service-hub/)
+- [🐙 GitHub](https://github.com/TangBoheng/Claw-Service-Hub)
+- [🤖 OpenClaw](https://github.com/openclaw/openclaw)

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" width="400" height="100">
+  <defs>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366F1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Logo 图标 -->
+  <g transform="translate(10, 10)">
+    <circle cx="40" cy="40" r="38" fill="url(#textGrad)"/>
+    <rect x="12" y="25" width="56" height="40" rx="4" fill="#1F2937"/>
+    <rect x="12" y="15" width="56" height="15" rx="3" fill="#374151"/>
+    <circle cx="28" cy="45" r="6" fill="#9CA3AF"/>
+    <circle cx="52" cy="45" r="6" fill="#9CA3AF"/>
+    <path d="M34 45 L46 45" stroke="#F59E0B" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  
+  <!-- 文本 -->
+  <text x="100" y="45" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="url(#textGrad)">Claw</text>
+  <text x="195" y="45" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#374151">Service</text>
+  <text x="335" y="45" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#374151">Hub</text>
+  
+  <!-- 标签线 -->
+  <line x1="100" y1="60" x2="380" y2="60" stroke="#E5E7EB" stroke-width="2" stroke-linecap="round"/>
+</svg>

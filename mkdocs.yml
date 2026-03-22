@@ -1,0 +1,56 @@
+site_name: Claw Service Hub
+site_description: "OpenClaw 子代理服务撮合平台 — 让 AI Agent 之间的服务发现与调用像呼吸一样简单"
+site_author: TangBoheng
+repo_url: https://github.com/TangBoheng/Claw-Service-Hub
+edit_url: "https://github.com/TangBoheng/Claw-Service-Hub/edit/main/"
+
+theme:
+  name: material
+  palette: 
+    - primary: teal
+      accent: cyan
+    - media: "(prefers-color-scheme: dark)"
+      primary: teal
+      accent: cyan
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - search.highlight
+
+nav:
+  - 首页: index.md
+  - 快速开始:
+      - quickstart.md
+      - installation.md
+  - 指南:
+      - guide/provider.md
+      - guide/consumer.md
+      - guide/architecture.md
+  - API 参考: api.md
+  - 示例:
+      - examples/index.md
+      - examples/weather.md
+      - examples/data_source.md
+  - 部署: deployment.md
+  - 变更日志: changelog.md
+
+plugins:
+  - search:
+      lang: zh
+  - macros
+
+markdown_extensions:
+  - admonition
+  - codehilite:
+      css_class: highlight
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/TangBoheng/Claw-Service-Hub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/claw-service-hub/

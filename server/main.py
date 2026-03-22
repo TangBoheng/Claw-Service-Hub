@@ -3,20 +3,27 @@
 Phase 1: 服务注册、发现、隧道、评分
 """
 print("[Server] Module loading...", flush=True)
+
+# 导入版本号
+from server import __version__
+
 import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Set, Dict
+import os
 
 import websockets
 from websockets.asyncio.server import ServerConnection
+
+# 配置日志
+from server.logging_config import logger, configure_logging
 
 # 本地模块 - 支持两种运行方式
 # 1. python -m server.main (需要 PYTHONPATH 包含项目根目录)
 # 2. python server/main.py (直接运行)
 import sys
-import os
 if __name__ == "__main__":
     # 当直接运行 server/main.py 时，添加父目录到 path
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,12 +80,13 @@ class HubServer:
         asyncio.create_task(self._heartbeat_loop())
         asyncio.create_task(self._cleanup_loop())
 
-        print(f"\n{'='*50}")
-        print(f"🛠️  Tool Service Hub Started")
-        print(f"{'='*50}")
-        print(f"   WebSocket: ws://{self.host}:{self.port}")
-        print(f"   REST API:  http://{self.host}:{self.port - 5000}")
-        print(f"{'='*50}\n")
+        logger.info(
+            "server_started",
+            version=__version__,
+            websocket_url=f"ws://{self.host}:{self.port}",
+            rest_api_url=f"http://{self.host}:{self.port - 5000}",
+            health_url=f"http://{self.host}:{self.port - 5000}/health"
+        )
 
         # 启动 WebSocket 服务器
         ws_server = websockets.serve(self._handle_client, self.host, self.port)
@@ -88,6 +96,7 @@ class HubServer:
             from aiohttp import web
 
             app = web.Application()
+            app.router.add_get("/health", self._handle_health)
             app.router.add_get("/api/services", self._handle_api_services)
             app.router.add_get("/api/services/{service_id}", self._handle_api_service_detail)
             app.router.add_get("/api/services/{service_id}/skill.md", self._handle_api_skill_doc)
@@ -100,11 +109,11 @@ class HubServer:
             site = web.TCPSite(runner, self.host, self.port - 5000)
             await site.start()
 
-            print(f"[Server] HTTP REST API started on http://{self.host}:{self.port - 5000}")
+            logger.info("http_rest_api_started", url=f"http://{self.host}:{self.port - 5000}")
         except ImportError:
-            print("[Server] aiohttp not installed, HTTP REST API disabled")
+            logger.warning("http_rest_api_disabled", reason="aiohttp not installed")
         except Exception as e:
-            print(f"[Server] Failed to start HTTP REST API: {e}")
+            logger.error("http_rest_api_failed", error=str(e))
 
         async with ws_server:
             await asyncio.Future()  # 永远运行
@@ -120,7 +129,7 @@ class HubServer:
         # 新的 websockets 库不再传递 path 参数
         path = ""
         client_id = str(uuid.uuid4())[:8]
-        print(f"[Server] Client connected: {client_id}")
+        logger.info("client_connected", client_id=client_id)
         
         self.clients.add(websocket)
 
@@ -131,9 +140,9 @@ class HubServer:
             async for message in websocket:
                 await self._process_message(websocket, client_id, message)
         except websockets.exceptions.ConnectionClosed:
-            print(f"[Server] Client disconnected: {client_id}")
+            logger.info("client_disconnected", client_id=client_id)
         except Exception as e:
-            print(f"[Server] Error: {e}")
+            logger.error("client_error", client_id=client_id, error=str(e))
         finally:
             self.clients.discard(websocket)
             # 清理 client_id 映射
@@ -156,7 +165,7 @@ class HubServer:
             
             # 调试：打印所有消息类型
             if msg_type not in ["heartbeat", "ping"]:
-                print(f"[Server] Received from {client_id}: type={msg_type}", flush=True)
+                logger.debug("message_received", client_id=client_id, message_type=msg_type)
             
             if msg_type == "register":
                 # 注册服务
@@ -282,8 +291,14 @@ class HubServer:
             "status": "online"
         }))
 
-        print(f"[Server] Service registered: {service.name} -> tunnel {tunnel.id}")
-        print(f"[Server]   Execution mode: {service.execution_mode}, Client type: {client_type}")
+        logger.info(
+            "service_registered",
+            service_name=service.name,
+            service_id=service_id,
+            tunnel_id=tunnel.id,
+            execution_mode=service.execution_mode,
+            client_type=client_type
+        )
 
     async def _handle_connect(self, websocket: ServerConnection, client_id: str, message: dict):
         """处理消费者客户端连接"""
@@ -655,6 +670,16 @@ class HubServer:
                 return_exceptions=True
             )
 
+
+    async def _handle_health(self, request):
+        """GET /health - 健康检查"""
+        from aiohttp import web
+        return web.json_response({
+            "status": "healthy",
+            "version": __version__,
+            "services": len(self.registry.list_all()),
+            "clients": len(self.clients)
+        })
 
     async def _handle_api_services(self, request):
         """GET /api/services - 列出所有服务"""
