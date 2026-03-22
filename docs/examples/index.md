@@ -136,7 +136,7 @@ asyncio.run(main())
 
 ## 更多示例
 
-- 📂 [CSV Processor Skill](../csv-processor-skill/) - 处理 CSV 文件
-- 🔌 [External Executor](../external_executor.py) - 外部执行器
-- 👤 [Subagent1 Management](../subagent1_management_only.py) - 管理型客户端
-- 🔍 [Subagent2 Consumer](../subagent2_skill_consumer.py) - 消费型客户端
+- 📂 [CSV Processor Skill](https://github.com/TangBoheng/Claw-Service-Hub/tree/main/examples/csv-processor-skill/) - 处理 CSV 文件
+- 🔌 [External Executor](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/external_executor.py) - 外部执行器
+- 👤 [Subagent1 Management](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/subagent1_management_only.py) - 管理型客户端
+- 🔍 [Subagent2 Consumer](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/subagent2_skill_consumer.py) - 消费型客户端
