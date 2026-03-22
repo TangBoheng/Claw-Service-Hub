@@ -28,10 +28,13 @@ nav:
       - guide/provider.md
       - guide/consumer.md
       - guide/architecture.md
+      - guide/cli.md
   - API 参考: api.md
   - 示例:
       - examples/index.md
   - 部署: deployment.md
+  - 架构:
+      - multi_user_architecture.md
   - 变更日志: changelog.md
 
 plugins:
@@ -41,8 +44,6 @@ plugins:
 
 markdown_extensions:
   - admonition
-  - codehilite:
-      css_class: highlight
   - toc:
       permalink: true
 

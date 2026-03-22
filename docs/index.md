@@ -1,14 +1,14 @@
 # 🛠️ Claw Service Hub
 
 <p align="center">
-  <img src="assets/logo-text.svg" alt="Claw Service Hub Logo" width="400"/>
+  <img src="logo-text.svg" alt="Claw Service Hub Logo" width="400"/>
 </p>
 
 > 🚀 **让 AI Agent 之间的服务发现与调用像呼吸一样简单**
 
 [![PyPI](https://img.shields.io/pypi/v/claw-service-hub)](https://pypi.org/project/claw-service-hub/)
 [![Python](https://img.shields.io/pypi/pyversions/claw-service-hub)](https://pypi.org/project/claw-service-hub/)
-[![License](https://img.shields.io/pypi/l/claw-service-hub)](LICENSE)
+[![License](https://img.shields.io/pypi/l/claw-service-hub)](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/LICENSE)
 [![Stars](https://img.shields.io/github/stars/TangBoheng/Claw-Service-Hub)](https://github.com/TangBoheng/Claw-Service-Hub/stargazers)
 [![Downloads](https://img.shields.io/pypi/dm/claw-service-hub)](https://pypi.org/project/claw-service-hub/)
 

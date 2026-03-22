@@ -21,7 +21,7 @@ LOG_LEVEL=INFO
 STORAGE_TYPE=memory  # 或 file
 ```
 
-详见 [.env.example](../.env.example)
+详见 [.env.example](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/.env.example)
 
 ---
 
@@ -157,4 +157,4 @@ logging.basicConfig(
 ## 下一步
 
 - 📖 查看 [API 参考](api.md)
-- 📖 查看 [故障排查](./troubleshooting.md)
+- 📖 查看 [故障排查](https://github.com/TangBoheng/Claw-Service-Hub/discussions)
