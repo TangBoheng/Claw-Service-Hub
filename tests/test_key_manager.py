@@ -49,7 +49,7 @@ def test_key_verification(key_manager):
     # Invalid key for wrong service
     result = key_manager.verify_key(key, "wrong-service")
     assert result["valid"] is False
-    assert result["reason"] == "Invalid service"
+    assert result["reason"] == "服务不匹配"
 
 
 def test_key_expiration(key_manager):
@@ -71,7 +71,7 @@ def test_key_expiration(key_manager):
     # Should be expired
     result = key_manager.verify_key(key, "test-service")
     assert result["valid"] is False
-    assert result["reason"] == "Key expired"
+    assert result["reason"] == "Key已过期"
 
 
 def test_key_call_limit(key_manager):
@@ -96,7 +96,7 @@ def test_key_call_limit(key_manager):
     key_manager.use_key(key)
     result = key_manager.verify_key(key, "test-service")
     assert result["valid"] is False
-    assert result["reason"] == "Call limit exceeded"
+    assert result["reason"] == "调用次数已用尽"
 
 
 def test_key_revocation(key_manager):
@@ -116,7 +116,7 @@ def test_key_revocation(key_manager):
     # Should be invalid after revocation
     result = key_manager.verify_key(key, "test-service")
     assert result["valid"] is False
-    assert result["reason"] == "Key revoked"
+    assert result["reason"] == "Key已禁用"
 
 
 def test_list_keys(key_manager):
@@ -155,9 +155,11 @@ def test_register_policy(key_manager):
     
     key_manager.register_policy("test-service", policy)
     
-    # Verify policy was stored
-    stored_policy = key_manager._lifecycle_policies.get("test-service")
-    assert stored_policy == policy
+    # Verify policy was stored (check internal format)
+    stored_policy = key_manager._service_policies.get("test-service")
+    assert stored_policy is not None
+    assert stored_policy["default"]["duration_seconds"] == 3600
+    assert stored_policy["default"]["max_calls"] == 100
 
 
 def test_generate_key_with_policy(key_manager):

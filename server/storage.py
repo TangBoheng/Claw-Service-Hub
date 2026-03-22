@@ -41,8 +41,7 @@ class Storage:
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             self._local.conn = sqlite3.connect(
                 self.db_path,
-                check_same_thread=False,
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+                check_same_thread=False
             )
             self._local.conn.row_factory = sqlite3.Row
             # Enable foreign keys
@@ -126,6 +125,21 @@ class Storage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_services_name ON services(name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_timestamp ON request_logs(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_service ON ratings(service_id)")
+            
+            # Key lifecycle table (for KeyManager persistence)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS key_lifecycle (
+                    key TEXT PRIMARY KEY,
+                    service_id TEXT NOT NULL,
+                    consumer_id TEXT NOT NULL,
+                    duration_seconds INTEGER DEFAULT 3600,
+                    max_calls INTEGER DEFAULT 100,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    is_active INTEGER DEFAULT 1,
+                    call_count INTEGER DEFAULT 0
+                )
+            """)
     
     # ========== Service Operations ==========
     
@@ -260,8 +274,13 @@ class Storage:
             return None
         
         # Check expiration
-        if row["expires_at"] and row["expires_at"] < datetime.now():
-            return None
+        expires_at = row["expires_at"]
+        if expires_at:
+            # Handle both string and datetime types
+            if isinstance(expires_at, str):
+                expires_at = datetime.fromisoformat(expires_at)
+            if expires_at < datetime.now():
+                return None
         
         return dict(row)
     
@@ -357,6 +376,73 @@ class Storage:
             (service_id,)
         ).fetchone()
         return row["avg"] if row and row["avg"] is not None else None
+    
+    # ========== Key Lifecycle Operations ==========
+    
+    def save_key(self, key_data: Dict[str, Any]) -> None:
+        """
+        Save or update a key lifecycle.
+        
+        Args:
+            key_data: Key data dictionary with: key, service_id, consumer_id, 
+                     duration_seconds, max_calls, created_at, is_active, call_count
+        """
+        with self._write_lock:
+            with self._transaction() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO key_lifecycle 
+                    (key, service_id, consumer_id, duration_seconds, max_calls, 
+                     created_at, expires_at, is_active, call_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    key_data.get("key"),
+                    key_data.get("service_id"),
+                    key_data.get("consumer_id"),
+                    key_data.get("duration_seconds", 3600),
+                    key_data.get("max_calls", 100),
+                    key_data.get("created_at"),
+                    key_data.get("expires_at"),
+                    1 if key_data.get("is_active", True) else 0,
+                    key_data.get("call_count", 0)
+                ))
+    
+    def get_key(self, key: str) -> Optional[Dict[str, Any]]:
+        """Get key lifecycle by key string."""
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT * FROM key_lifecycle WHERE key = ?",
+            (key,)
+        ).fetchone()
+        return dict(row) if row else None
+    
+    def get_all_keys(self) -> List[Dict[str, Any]]:
+        """Get all key lifecycles."""
+        conn = self._get_connection()
+        rows = conn.execute("SELECT * FROM key_lifecycle").fetchall()
+        return [dict(row) for row in rows]
+    
+    def update_key_usage(self, key: str, increment: bool = True) -> bool:
+        """Update key usage count."""
+        with self._write_lock:
+            with self._transaction() as conn:
+                cursor = conn.cursor()
+                if increment:
+                    cursor.execute(
+                        "UPDATE key_lifecycle SET call_count = call_count + 1 WHERE key = ?",
+                        (key,)
+                    )
+                return cursor.rowcount > 0
+    
+    def deactivate_key(self, key: str) -> bool:
+        """Deactivate a key."""
+        with self._write_lock:
+            with self._transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE key_lifecycle SET is_active = 0 WHERE key = ?",
+                    (key,)
+                )
+                return cursor.rowcount > 0
     
     # ========== Utility Methods ==========
     

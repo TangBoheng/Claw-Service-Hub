@@ -187,14 +187,25 @@ def test_get_nonexistent_api_key(storage):
 
 
 def test_update_key_usage(storage):
-    """Test updating API key last_used timestamp."""
-    key_hash = "hashed_key_789"
-    storage.save_api_key(key_hash, "Test Key")
+    """Test updating key lifecycle usage count."""
+    # Save a key lifecycle
+    storage.save_key({
+        "key": "test_key_123",
+        "service_id": "test-service",
+        "consumer_id": "test-consumer",
+        "duration_seconds": 3600,
+        "max_calls": 100,
+        "created_at": datetime.now().isoformat(),
+        "is_active": True,
+        "call_count": 0
+    })
     
-    storage.update_key_usage(key_hash)
+    # Update usage count
+    storage.update_key_usage("test_key_123")
     
-    key_info = storage.get_api_key(key_hash)
-    assert key_info["last_used"] is not None
+    # Verify count was incremented
+    key_info = storage.get_key("test_key_123")
+    assert key_info["call_count"] == 1
 
 
 def test_deactivate_api_key(storage):

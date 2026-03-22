@@ -31,8 +31,6 @@ nav:
   - API 参考: api.md
   - 示例:
       - examples/index.md
-      - examples/weather.md
-      - examples/data_source.md
   - 部署: deployment.md
   - 变更日志: changelog.md
 

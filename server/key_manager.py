@@ -62,12 +62,14 @@ class KeyLifecycle:
     
     def to_dict(self) -> dict:
         """转换为字典"""
+        duration_seconds = int((self.expires_at - self.created_at).total_seconds())
         return {
             "key": self.key,
             "service_id": self.service_id,
             "consumer_id": self.consumer_id,
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
+            "duration_seconds": duration_seconds,
             "max_calls": self.max_calls,
             "call_count": self.call_count,
             "remaining_calls": self.remaining_calls(),
@@ -81,21 +83,83 @@ class KeyManager:
     """
     Key 管理器
     负责 Key 的生成、验证、存储
+    支持持久化到 SQLite
     """
     
-    def __init__(self):
+    def __init__(self, db_path: str = None, storage=None):
+        """
+        Initialize KeyManager.
+        
+        Args:
+            db_path: Path to SQLite database file for persistence (optional)
+            storage: Storage instance (optional, for sharing with other managers)
+        """
         # Key 存储: key -> KeyLifecycle
         self._keys: Dict[str, KeyLifecycle] = {}
         
         # 服务生命周期策略: service_id -> policy
         self._service_policies: Dict[str, dict] = {}
+        
+        # Storage for persistence
+        self._storage = storage
+        self._db_path = db_path
+        
+        # Load existing keys from storage if available
+        if db_path:
+            self._load_from_storage()
+    
+    def _load_from_storage(self):
+        """Load keys from SQLite storage."""
+        if not self._storage:
+            from server.storage import Storage
+            self._storage = Storage(self._db_path)
+        
+        try:
+            keys = self._storage.get_all_keys()
+            for key_data in keys:
+                lifecycle = KeyLifecycle(
+                    key=key_data["key"],
+                    service_id=key_data["service_id"],
+                    consumer_id=key_data["consumer_id"],
+                    duration_seconds=key_data.get("duration_seconds", 3600),
+                    max_calls=key_data.get("max_calls", 100),
+                    created_at=datetime.fromisoformat(key_data["created_at"]) if key_data.get("created_at") else None
+                )
+                lifecycle.is_active = key_data.get("is_active", True)
+                lifecycle.call_count = key_data.get("call_count", 0)
+                self._keys[key_data["key"]] = lifecycle
+        except Exception:
+            pass  # Ignore if storage not available
+    
+    def _save_key(self, key: str, lifecycle: KeyLifecycle):
+        """Save key to storage."""
+        if self._storage:
+            self._storage.save_key({
+                "key": key,
+                "service_id": lifecycle.service_id,
+                "consumer_id": lifecycle.consumer_id,
+                "duration_seconds": int((lifecycle.expires_at - lifecycle.created_at).total_seconds()),
+                "max_calls": lifecycle.max_calls,
+                "created_at": lifecycle.created_at.isoformat(),
+                "is_active": lifecycle.is_active,
+                "call_count": lifecycle.call_count
+            })
     
     def register_policy(self, service_id: str, policy: dict):
-        """Provider 注册服务的生命周期策略"""
+        """Provider 注册服务的生命周期策略
+        
+        Supports both formats:
+        - New format: {"duration_seconds": 3600, "max_calls": 100, "custom_policies": {...}}
+        - Old format (compat): {"default_duration_seconds": 1800, "default_max_calls": 50}
+        """
+        # Handle old format compatibility
+        duration = policy.get("duration_seconds") or policy.get("default_duration_seconds", 3600)
+        max_calls = policy.get("max_calls") or policy.get("default_max_calls", 100)
+        
         self._service_policies[service_id] = {
             "default": {
-                "duration_seconds": policy.get("duration_seconds", 3600),
-                "max_calls": policy.get("max_calls", 100)
+                "duration_seconds": duration,
+                "max_calls": max_calls
             },
             "custom": policy.get("custom_policies", {})
         }
@@ -156,6 +220,10 @@ class KeyManager:
         )
         
         self._keys[key] = lifecycle
+        
+        # Persist to storage if available
+        self._save_key(key, lifecycle)
+        
         return key
     
     def verify_key(self, key: str, service_id: str) -> dict:

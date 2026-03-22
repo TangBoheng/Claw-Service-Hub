@@ -31,7 +31,6 @@ async def get_weather(**params):
 async def get_forecast(**params):
     location = params.get("location", "Shanghai")
     days = params.get("days", 3)
-    # 返回模拟的预报数据
     return {
         "location": location,
         "forecast": [
@@ -48,7 +47,6 @@ async def main():
         tags=["weather", "api", "data"]
     )
     
-    # 注册多个处理器
     runner.register_handler("get_weather", get_weather)
     runner.register_handler("get_forecast", get_forecast)
     
@@ -68,13 +66,11 @@ async def main():
     client = SkillQueryClient("ws://localhost:8765")
     await client.connect()
     
-    # 发现天气服务
     services = await client.discover(tags=["weather"])
     if not services:
         print("未找到天气服务")
         return
     
-    # 调用服务
     result = await client.call_service(
         service_id=services[0]["id"],
         method="get_weather",
@@ -82,7 +78,6 @@ async def main():
     )
     
     print(f"上海天气: {result}")
-    
     await client.disconnect()
 
 asyncio.run(main())
@@ -100,7 +95,6 @@ import aiohttp
 from client.client import LocalServiceRunner
 
 async def fetch_url(**params):
-    """获取 URL 内容"""
     url = params.get("url")
     if not url:
         return {"error": "URL is required"}
@@ -115,7 +109,6 @@ async def fetch_url(**params):
             }
 
 async def read_file(**params):
-    """读取文件内容"""
     import os
     path = params.get("path")
     if not path or not os.path.exists(path):
@@ -124,16 +117,12 @@ async def read_file(**params):
     with open(path, 'r') as f:
         content = f.read()
     
-    return {
-        "path": path,
-        "size": len(content),
-        "content": content[:500]
-    }
+    return {"path": path, "size": len(content), "content": content[:500]}
 
 async def main():
     runner = LocalServiceRunner(
         name="data-source-service",
-        description="通用数据源服务 - 支持文件读取、API调用",
+        description="通用数据源服务",
         hub_url="ws://localhost:8765",
         tags=["data", "utility", "api"]
     )
@@ -147,25 +136,11 @@ async def main():
 asyncio.run(main())
 ```
 
-**使用场景：**
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│ data-svc        │────▶│   Hub (WS:8765)  │◀────│ workflow-agent      │
-│ (数据服务)      │     │                  │     │ (工作流代理)         │
-└─────────────────┘     └──────────────────┘     └─────────────────────┘
-                                                        │
-                              ┌─────────────────────────┘
-                              ▼
-                        ┌─────────────────────┐
-                        │ 处理数据并执行任务  │
-                        └─────────────────────┘
-```
-
 ---
 
 ## 更多示例
 
-- 📡 [REST API 集成示例](./rest_api.md)
-- 🔄 [工作流编排示例](./workflow.md)
-- 🏷️ [多标签搜索示例](./search.md]
+- 📂 [CSV Processor Skill](../csv-processor-skill/) - 处理 CSV 文件
+- 🔌 [External Executor](../external_executor.py) - 外部执行器
+- 👤 [Subagent1 Management](../subagent1_management_only.py) - 管理型客户端
+- 🔍 [Subagent2 Consumer](../subagent2_skill_consumer.py) - 消费型客户端

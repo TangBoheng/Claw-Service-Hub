@@ -170,6 +170,26 @@ class TunnelManager:
         tunnel = self._tunnels.get(tunnel_id)
         if tunnel:
             tunnel.last_active = datetime.now(timezone.utc).isoformat()
+    
+    async def cleanup_inactive(self, max_age_seconds: int = 3600):
+        """清理不活跃的隧道"""
+        now = datetime.now(timezone.utc)
+        tunnels_to_remove = []
+        
+        for tunnel_id, tunnel in self._tunnels.items():
+            try:
+                last_active = datetime.fromisoformat(tunnel.last_active)
+                age = (now - last_active).total_seconds()
+                if age > max_age_seconds:
+                    tunnels_to_remove.append(tunnel_id)
+            except (ValueError, TypeError):
+                # If we can't parse the date, remove the tunnel
+                tunnels_to_remove.append(tunnel_id)
+        
+        for tunnel_id in tunnels_to_remove:
+            await self.close_tunnel(tunnel_id)
+        
+        return len(tunnels_to_remove)
 
 
 # 全局隧道管理器
