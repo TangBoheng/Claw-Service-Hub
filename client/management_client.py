@@ -6,11 +6,12 @@
 - 管理服务的生命周期（注册、更新、注销）
 - 不处理业务请求，请求转发到外部执行器（如 n8n、python 服务）
 """
+
 import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Callable
+from typing import Callable, Dict, List, Optional
 
 import websockets
 from websockets.client import WebSocketClientProtocol
@@ -88,10 +89,11 @@ class ManagementOnlyClient:
         if not self.skill_dir:
             return None
         import os
+
         skill_md_path = os.path.join(self.skill_dir, "SKILL.md")
         if os.path.exists(skill_md_path):
             try:
-                with open(skill_md_path, 'r', encoding='utf-8') as f:
+                with open(skill_md_path, "r", encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
                 print(f"[ManagementClient] Warning: Failed to load {skill_md_path}: {e}")
@@ -139,21 +141,16 @@ class ManagementOnlyClient:
             response = {"error": f"Unknown method: {method}"}
 
         # 发送响应
-        await self.websocket.send(json.dumps({
-            "type": "response",
-            "request_id": request_id,
-            "response": response
-        }))
+        await self.websocket.send(
+            json.dumps({"type": "response", "request_id": request_id, "response": response})
+        )
         print(f"[ManagementClient] Response sent for {method}")
 
     async def connect(self):
         """连接到云端并注册服务"""
         print(f"[ManagementClient] Connecting to {self.hub_url}...")
 
-        self.websocket = await websockets.connect(
-            self.hub_url,
-            ping_interval=None
-        )
+        self.websocket = await websockets.connect(self.hub_url, ping_interval=None)
 
         self.running = True
 
@@ -170,10 +167,10 @@ class ManagementOnlyClient:
                 "emoji": self.emoji,
                 "requires": self.requires,
                 "execution_mode": self.execution_mode,
-                "interface_spec": self.interface_spec
+                "interface_spec": self.interface_spec,
             },
             "client_type": "management_only",  # 标识为纯管理型客户端
-            "client_id": self.client_id
+            "client_id": self.client_id,
         }
 
         if self.skill_doc:
@@ -217,7 +214,9 @@ class ManagementOnlyClient:
                 # 注册确认
                 self.service_id = message.get("service_id")
                 self.tunnel_id = message.get("tunnel_id")
-                print(f"[ManagementClient] Registered! service_id={self.service_id}, tunnel_id={self.tunnel_id}")
+                print(
+                    f"[ManagementClient] Registered! service_id={self.service_id}, tunnel_id={self.tunnel_id}"
+                )
 
                 # 触发回调
                 for cb in self._callbacks["registered"]:
@@ -225,7 +224,9 @@ class ManagementOnlyClient:
 
             elif msg_type == "channel_request":
                 # 用户请求建立服务通道
-                print(f"[ManagementClient] Channel request from user: {message.get('user_client_id')}")
+                print(
+                    f"[ManagementClient] Channel request from user: {message.get('user_client_id')}"
+                )
                 for cb in self._callbacks["channel_request"]:
                     await cb(message)
 
@@ -254,10 +255,9 @@ class ManagementOnlyClient:
             await asyncio.sleep(self.heartbeat_interval)
             if self.websocket and self.service_id:
                 try:
-                    await self.websocket.send(json.dumps({
-                        "type": "heartbeat",
-                        "service_id": self.service_id
-                    }))
+                    await self.websocket.send(
+                        json.dumps({"type": "heartbeat", "service_id": self.service_id})
+                    )
                 except Exception as e:
                     print(f"[ManagementClient] Heartbeat error: {e}")
                     self.running = False
@@ -268,11 +268,7 @@ class ManagementOnlyClient:
         if not self.websocket:
             raise RuntimeError("Not connected")
 
-        update_msg = {
-            "type": "update_service",
-            "service_id": self.service_id,
-            "updates": kwargs
-        }
+        update_msg = {"type": "update_service", "service_id": self.service_id, "updates": kwargs}
 
         await self.websocket.send(json.dumps(update_msg))
         print(f"[ManagementClient] Service info updated: {kwargs.keys()}")
@@ -288,7 +284,7 @@ class ManagementOnlyClient:
             "accepted": accepted,
             "message": message,
             "service_id": self.service_id,
-            "tunnel_id": self.tunnel_id
+            "tunnel_id": self.tunnel_id,
         }
 
         await self.websocket.send(json.dumps(confirm_msg))
@@ -335,7 +331,7 @@ class ServiceRegistrar:
             skill_dir=skill_dir,
             hub_url=hub_url,
             execution_mode=execution_mode,
-            interface_spec=interface_spec
+            interface_spec=interface_spec,
         )
 
         # 默认自动接受通道请求
@@ -365,18 +361,10 @@ class ServiceRegistrar:
 
 # 便捷函数
 async def register_service(
-    name: str,
-    description: str,
-    endpoint: str,
-    hub_url: str = "ws://localhost:8765",
-    **kwargs
+    name: str, description: str, endpoint: str, hub_url: str = "ws://localhost:8765", **kwargs
 ):
     """快速注册一个管理型服务"""
     registrar = ServiceRegistrar(
-        name=name,
-        description=description,
-        endpoint=endpoint,
-        hub_url=hub_url,
-        **kwargs
+        name=name, description=description, endpoint=endpoint, hub_url=hub_url, **kwargs
     )
     await registrar.run()

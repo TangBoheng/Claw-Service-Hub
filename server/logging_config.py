@@ -1,4 +1,5 @@
 """Logging configuration using structlog."""
+
 import logging
 import sys
 from typing import Any, Dict
@@ -9,7 +10,7 @@ import structlog
 def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
     """
     Configure structured logging for the application.
-    
+
     Args:
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         json_format: Whether to output logs in JSON format (useful for production)
@@ -44,10 +45,10 @@ def configure_logging(level: str = "INFO", json_format: bool = False) -> None:
 def get_logger(name: str = __name__) -> structlog.stdlib.BoundLogger:
     """
     Get a configured logger instance.
-    
+
     Args:
         name: Logger name (typically __name__ of the calling module)
-        
+
     Returns:
         Configured structlog logger
     """

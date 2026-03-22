@@ -2,7 +2,7 @@ site_name: Claw Service Hub
 site_description: "OpenClaw 子代理服务撮合平台 — 让 AI Agent 之间的服务发现与调用像呼吸一样简单"
 site_author: TangBoheng
 repo_url: https://github.com/TangBoheng/Claw-Service-Hub
-edit_url: "https://github.com/TangBoheng/Claw-Service-Hub/edit/main/"
+repo_name: TangBoheng/Claw-Service-Hub
 
 theme:
   name: material

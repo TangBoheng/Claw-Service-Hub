@@ -7,11 +7,12 @@ Skill 查询客户端 - 用于 subagent2 通过 skill 方式发现和使用服�
 - establish_channel: 建立服务通道
 - call_service: 调用服务
 """
+
 import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Any
+from typing import Any, Callable, Dict, List, Optional
 
 import websockets
 from websockets.client import WebSocketClientProtocol
@@ -42,11 +43,7 @@ class SkillQueryClient:
         result = await client.call_service(channel, "get_image", {"id": "123"})
     """
 
-    def __init__(
-        self,
-        hub_url: str = "ws://localhost:8765",
-        client_type: str = "skill_consumer"
-    ):
+    def __init__(self, hub_url: str = "ws://localhost:8765", client_type: str = "skill_consumer"):
         self.hub_url = hub_url
         self.client_type = client_type
         self.client_id = str(uuid.uuid4())[:8]
@@ -63,10 +60,7 @@ class SkillQueryClient:
         """连接到云端"""
         print(f"[SkillClient] Connecting to {self.hub_url}...")
 
-        self.websocket = await websockets.connect(
-            self.hub_url,
-            ping_interval=None
-        )
+        self.websocket = await websockets.connect(self.hub_url, ping_interval=None)
 
         self.running = True
 
@@ -74,7 +68,7 @@ class SkillQueryClient:
         connect_msg = {
             "type": "connect",
             "client_type": self.client_type,
-            "client_id": self.client_id
+            "client_id": self.client_id,
         }
 
         await self.websocket.send(json.dumps(connect_msg))
@@ -123,7 +117,7 @@ class SkillQueryClient:
                 self._connected_services[service_id] = {
                     "channel_id": message.get("channel_id"),
                     "tunnel_id": message.get("tunnel_id"),
-                    "established_at": datetime.now().isoformat()
+                    "established_at": datetime.now().isoformat(),
                 }
                 self._resolve_future(request_id, message)
 
@@ -134,7 +128,7 @@ class SkillQueryClient:
             elif msg_type == "error":
                 # 错误响应
                 self._resolve_future(request_id, {"error": message.get("message", "Unknown error")})
-            
+
             elif msg_type == "key_request_response":
                 # Key 请求响应
                 self._resolve_future(request_id, message)
@@ -167,7 +161,7 @@ class SkillQueryClient:
             "type": msg_type,
             "request_id": request_id,
             "client_id": self.client_id,
-            **payload
+            **payload,
         }
 
         await self.websocket.send(json.dumps(message))
@@ -186,7 +180,7 @@ class SkillQueryClient:
         query: str = "",
         tags: List[str] = None,
         execution_mode: str = None,
-        status: str = "online"
+        status: str = "online",
     ) -> List[dict]:
         """
         发现可用服务（OpenClaw 风格的 skill 发现）
@@ -200,12 +194,15 @@ class SkillQueryClient:
         Returns:
             服务描述符列表
         """
-        result = await self._send_request("skill_discover", {
-            "query": query,
-            "tags": tags or [],
-            "execution_mode": execution_mode,
-            "status": status
-        })
+        result = await self._send_request(
+            "skill_discover",
+            {
+                "query": query,
+                "tags": tags or [],
+                "execution_mode": execution_mode,
+                "status": status,
+            },
+        )
 
         if isinstance(result, list):
             return result
@@ -221,9 +218,7 @@ class SkillQueryClient:
         Returns:
             包含 documentation, interface_spec 的字典
         """
-        result = await self._send_request("get_service_docs", {
-            "service_id": service_id
-        })
+        result = await self._send_request("get_service_docs", {"service_id": service_id})
 
         return result
 
@@ -237,9 +232,7 @@ class SkillQueryClient:
         Returns:
             SKILL.md 内容或 None
         """
-        result = await self._send_request("get_skill_doc", {
-            "service_id": service_id
-        })
+        result = await self._send_request("get_skill_doc", {"service_id": service_id})
 
         if isinstance(result, str):
             return result
@@ -247,11 +240,7 @@ class SkillQueryClient:
 
     # ===== 通道管理 =====
 
-    async def establish_channel(
-        self,
-        service_id: str,
-        timeout: float = 30.0
-    ) -> dict:
+    async def establish_channel(self, service_id: str, timeout: float = 30.0) -> dict:
         """
         建立到服务的通道
 
@@ -262,20 +251,24 @@ class SkillQueryClient:
         Returns:
             包含 channel_id, tunnel_id 的字典
         """
-        result = await self._send_request("establish_channel", {
-            "service_id": service_id,
-            "consumer_client_id": self.client_id
-        }, timeout=timeout)
+        result = await self._send_request(
+            "establish_channel",
+            {"service_id": service_id, "consumer_client_id": self.client_id},
+            timeout=timeout,
+        )
 
         return result
 
     async def close_channel(self, service_id: str):
         """关闭服务通道"""
         if service_id in self._connected_services:
-            await self._send_request("close_channel", {
-                "service_id": service_id,
-                "channel_id": self._connected_services[service_id].get("channel_id")
-            })
+            await self._send_request(
+                "close_channel",
+                {
+                    "service_id": service_id,
+                    "channel_id": self._connected_services[service_id].get("channel_id"),
+                },
+            )
             del self._connected_services[service_id]
 
     # ===== 服务调用 =====
@@ -286,7 +279,7 @@ class SkillQueryClient:
         method: str,
         params: dict = None,
         key: str = None,
-        timeout: float = 60.0
+        timeout: float = 60.0,
     ) -> dict:
         """
         调用远程服务
@@ -319,21 +312,17 @@ class SkillQueryClient:
             "service_id": service_id,
             "tunnel_id": tunnel_id,
             "method": method,
-            "params": params or {}
+            "params": params or {},
         }
         if key:
             payload["key"] = key
-        
+
         result = await self._send_request("call_service", payload, timeout=timeout)
 
         return result
 
     async def call_with_channel(
-        self,
-        channel: dict,
-        method: str,
-        params: dict = None,
-        timeout: float = 60.0
+        self, channel: dict, method: str, params: dict = None, timeout: float = 60.0
     ) -> dict:
         """
         使用指定的通道调用服务
@@ -353,59 +342,58 @@ class SkillQueryClient:
         if not tunnel_id:
             return {"error": "Invalid channel: missing tunnel_id"}
 
-        result = await self._send_request("call_service", {
-            "service_id": service_id,
-            "tunnel_id": tunnel_id,
-            "method": method,
-            "params": params or {}
-        }, timeout=timeout)
+        result = await self._send_request(
+            "call_service",
+            {
+                "service_id": service_id,
+                "tunnel_id": tunnel_id,
+                "method": method,
+                "params": params or {},
+            },
+            timeout=timeout,
+        )
 
         return result
 
-    async def request_key(
-        self,
-        service_id: str,
-        purpose: str = ""
-    ) -> dict:
+    async def request_key(self, service_id: str, purpose: str = "") -> dict:
         """
         请求服务的访问 Key
-        
+
         Args:
             service_id: 服务ID
             purpose: 用途说明
-            
+
         Returns:
             {"success": True, "key": "...", "lifecycle": {...}}
             或 {"success": False, "reason": "..."}
         """
         print(f"[SkillClient] request_key: service_id={service_id}, purpose={purpose}")
-        
+
         # 发送 key_request 消息
-        result = await self._send_request("key_request", {
-            "service_id": service_id,
-            "purpose": purpose
-        }, timeout=30.0)
-        
+        result = await self._send_request(
+            "key_request", {"service_id": service_id, "purpose": purpose}, timeout=30.0
+        )
+
         print(f"[SkillClient] request_key result: {result}")
-        
+
         # 如果成功，存储 key
         if result.get("success") and result.get("key"):
-            if not hasattr(self, '_keys'):
+            if not hasattr(self, "_keys"):
                 self._keys = {}
             self._keys[service_id] = result["key"]
             result["lifecycle"] = result.get("lifecycle", {})
-        
+
         return result
-    
+
     def get_stored_key(self, service_id: str) -> str:
         """获取已存储的 Key"""
-        if hasattr(self, '_keys'):
+        if hasattr(self, "_keys"):
             return self._keys.get(service_id)
         return None
-    
+
     def store_key(self, service_id: str, key: str):
         """存储 Key"""
-        if not hasattr(self, '_keys'):
+        if not hasattr(self, "_keys"):
             self._keys = {}
         self._keys[service_id] = key
 

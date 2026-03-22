@@ -1,7 +1,9 @@
 """Pytest configuration and fixtures."""
+
 import asyncio
 import os
 import sys
+
 import pytest
 
 # Add project root to path
@@ -11,9 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def pytest_configure(config):
     """Configure pytest."""
     # Register custom markers
-    config.addinivalue_line(
-        "markers", "asyncio: mark test as async"
-    )
+    config.addinivalue_line("markers", "asyncio: mark test as async")
 
 
 @pytest.fixture(scope="session")

@@ -2,17 +2,19 @@
 服务注册与发现模块
 参考 OpenClaw skill 的快速发现机制
 """
-import json
+
 import asyncio
+import json
+import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
-import uuid
 
 
 @dataclass
 class ToolService:
     """工具服务元数据 - 类似 SKILL.md 的 metadata"""
+
     id: str
     name: str
     description: str
@@ -67,7 +69,7 @@ class ToolService:
             "status": self.status,
             "tunnel_id": self.tunnel_id,
             "execution_mode": self.execution_mode,
-            "provider_client_id": self.provider_client_id
+            "provider_client_id": self.provider_client_id,
         }
 
     def to_skill_descriptor(self) -> dict:
@@ -84,24 +86,24 @@ class ToolService:
             "requires": self.requires,
             "execution_mode": self.execution_mode,
             "interface_spec": self.interface_spec,
-            "status": self.status
+            "status": self.status,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'ToolService':
+    def from_dict(cls, data: dict) -> "ToolService":
         return cls(**data)
 
 
 class ServiceRegistry:
     """
     服务注册表 - 参考 skill 扫描发现机制
-    
+
     类似 OpenClaw skill 的工作方式：
     - skill: 启动时扫描 skills/ 目录发现
     - registry: 节点启动时主动注册服务
     - 发现: REST API 查询 + 实时推送
     """
-    
+
     def __init__(self, heartbeat_ttl: int = 60):
         """
         Args:
@@ -111,7 +113,7 @@ class ServiceRegistry:
         self._skill_docs: Dict[str, str] = {}  # service_id -> skill.md 内容
         self._heartbeat_ttl = heartbeat_ttl
         self._callbacks: List[callable] = []
-    
+
     async def register(self, service: ToolService, skill_doc: str = None) -> str:
         """注册服务，返回服务ID"""
         if not service.id:
@@ -131,7 +133,7 @@ class ServiceRegistry:
 
         print(f"[Registry] Service registered: {service.name} (id={service.id})")
         return service.id
-    
+
     async def unregister(self, service_id: str) -> bool:
         """注销服务"""
         if service_id in self._services:
@@ -142,7 +144,7 @@ class ServiceRegistry:
             print(f"[Registry] Service unregistered: {service.name} (id={service_id})")
             return True
         return False
-    
+
     async def heartbeat(self, service_id: str) -> bool:
         """收到心跳"""
         if service_id in self._services:
@@ -150,7 +152,7 @@ class ServiceRegistry:
             self._services[service_id].status = "online"
             return True
         return False
-    
+
     def get(self, service_id: str) -> Optional[ToolService]:
         """获取单个服务"""
         return self._services.get(service_id)
@@ -176,7 +178,7 @@ class ServiceRegistry:
         name: str = None,
         tags: List[str] = None,
         status: str = None,
-        execution_mode: str = None
+        execution_mode: str = None,
     ) -> List[ToolService]:
         """
         查找服务 - 类似 skill 的快速发现
@@ -197,19 +199,19 @@ class ServiceRegistry:
             results = [s for s in results if s.execution_mode == execution_mode]
 
         return list(results)
-    
+
     async def cleanup_stale(self):
         """清理超时离线服务"""
         now = datetime.now(timezone.utc)
         stale_ids = []
-        
+
         for sid, service in self._services.items():
             last_hb = datetime.fromisoformat(service.last_heartbeat)
             if last_hb.tzinfo is None:
                 last_hb = last_hb.replace(tzinfo=timezone.utc)
             if (now - last_hb).total_seconds() > self._heartbeat_ttl:
                 stale_ids.append(sid)
-        
+
         for sid in stale_ids:
             service = self._services.pop(sid, None)
             # 同时清理 skill_docs
@@ -218,11 +220,11 @@ class ServiceRegistry:
                 service.status = "offline"
                 await self._notify_listeners("offline", service)
                 print(f"[Registry] Service stale: {service.name} (id={sid})")
-    
+
     def add_listener(self, callback: callable):
         """添加状态变更监听器"""
         self._callbacks.append(callback)
-    
+
     async def _notify_listeners(self, event: str, service: ToolService):
         for cb in self._callbacks:
             try:

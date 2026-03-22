@@ -2,8 +2,9 @@
 """
 快速启动服务器脚本
 """
-import sys
+
 import os
+import sys
 
 # 添加到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

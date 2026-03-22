@@ -3,9 +3,10 @@ CSV Processor Tool Service Example
 
 This demonstrates how to use the new SkillMetadata + skill.md feature.
 """
+
 import asyncio
-import sys
 import os
+import sys
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,7 +22,7 @@ async def handle_analyze(file_path: str) -> dict:
         "file_path": file_path,
         "row_count": 100,
         "column_count": 5,
-        "message": "CSV analyzed successfully"
+        "message": "CSV analyzed successfully",
     }
 
 
@@ -31,7 +32,7 @@ async def handle_convert(file_path: str, target_format: str = "json") -> dict:
         "status": "success",
         "file_path": file_path,
         "target_format": target_format,
-        "message": f"Converted to {target_format}"
+        "message": f"Converted to {target_format}",
     }
 
 
@@ -48,7 +49,7 @@ async def main():
         emoji="📊",
         requires={"bins": ["python"], "env": []},
         skill_dir=skill_dir,  # 会自动加载 SKILL.md
-        hub_url="ws://localhost:8765"
+        hub_url="ws://localhost:8765",
     )
 
     # 注册处理器

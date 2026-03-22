@@ -7,13 +7,14 @@ This test verifies:
 3. ServiceRegistry can store and retrieve skill.md
 4. Client can load and send skill_doc
 """
+
 import asyncio
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.registry import ToolService, ServiceRegistry
+from server.registry import ServiceRegistry, ToolService
 
 
 def test_tool_service_metadata():
@@ -26,12 +27,15 @@ def test_tool_service_metadata():
         description="A test service",
         emoji="🧪",
         requires={"bins": ["python"], "env": ["API_KEY"]},
-        tags=["test", "demo"]
+        tags=["test", "demo"],
     )
 
     # Verify fields
     assert service.emoji == "🧪", "emoji field not set correctly"
-    assert service.requires == {"bins": ["python"], "env": ["API_KEY"]}, "requires field not set correctly"
+    assert service.requires == {
+        "bins": ["python"],
+        "env": ["API_KEY"],
+    }, "requires field not set correctly"
 
     # Test to_metadata_dict
     metadata = service.to_metadata_dict()
@@ -53,7 +57,7 @@ async def test_skill_doc_storage():
     service = ToolService(
         id="",  # 空ID，注册时会自动生成
         name="doc-service",
-        description="Service with documentation"
+        description="Service with documentation",
     )
 
     skill_doc = """---
@@ -115,16 +119,14 @@ This is test content.
     # Import client and test loading
     from client.client import ToolServiceClient
 
-    client = ToolServiceClient(
-        name="test-csv",
-        skill_dir=test_skill_dir
-    )
+    client = ToolServiceClient(name="test-csv", skill_dir=test_skill_dir)
 
     # Verify skill_doc is loaded
     assert client.skill_doc == skill_md_content, "skill_doc not loaded correctly"
 
     # Cleanup
     import shutil
+
     shutil.rmtree(test_skill_dir)
 
     print("  ✓ Client skill.md loading works correctly")
@@ -153,6 +155,7 @@ async def run_all_tests():
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

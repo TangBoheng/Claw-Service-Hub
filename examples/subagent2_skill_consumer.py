@@ -7,9 +7,10 @@
 - 建立服务通道
 - 调用远程服务
 """
+
 import asyncio
-import sys
 import os
+import sys
 
 # 添加项目根目录到 path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,16 +30,14 @@ async def main():
         # 连接到撮合系统
         await client.connect()
 
-        print("="*50)
+        print("=" * 50)
         print("Subagent2: Skill 方式查询服务")
-        print("="*50)
+        print("=" * 50)
 
         # 步骤1: 发现服务
         print("\n步骤1: 查询可用的图片服务...")
         services = await client.discover(
-            query="coco",
-            tags=["image", "data"],
-            execution_mode="external"  # 只查询外部执行的服务
+            query="coco", tags=["image", "data"], execution_mode="external"  # 只查询外部执行的服务
         )
 
         if not services:
@@ -55,7 +54,7 @@ async def main():
 
         # 选择第一个服务
         service = services[0]
-        service_id = service['skill_id']
+        service_id = service["skill_id"]
 
         # 步骤2: 获取服务文档
         print("\n步骤2: 获取服务文档...")
@@ -66,10 +65,10 @@ async def main():
         print(f"执行模式: {docs['execution_mode']}")
         print(f"外部端点: {docs['endpoint']}")
 
-        if docs.get('interface_spec'):
-            spec = docs['interface_spec']
+        if docs.get("interface_spec"):
+            spec = docs["interface_spec"]
             print(f"\n接口规范:")
-            for method in spec.get('methods', []):
+            for method in spec.get("methods", []):
                 print(f"  - {method['name']}: {method['description']}")
                 print(f"    参数: {list(method.get('parameters', {}).keys())}")
 
@@ -77,7 +76,7 @@ async def main():
         print("\n步骤3: 建立服务通道...")
         channel = await client.establish_channel(service_id)
 
-        if 'error' in channel:
+        if "error" in channel:
             print(f"建立通道失败: {channel['error']}")
             return
 
@@ -90,12 +89,10 @@ async def main():
 
         # 调用 list_images 方法
         result = await client.call_service(
-            service_id=service_id,
-            method="list_images",
-            params={"limit": 5}
+            service_id=service_id, method="list_images", params={"limit": 5}
         )
 
-        if 'error' in result:
+        if "error" in result:
             print(f"调用失败: {result['error']}")
         else:
             print(f"调用成功!")

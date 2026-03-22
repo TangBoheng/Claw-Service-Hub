@@ -4,10 +4,11 @@
 模拟 subagent1 注册的外部服务（如 n8n webhook 或 python 服务）
 这个服务实际处理业务请求。
 """
+
 import asyncio
 import json
-from aiohttp import web
 
+from aiohttp import web
 
 # 模拟 COCO 图片数据
 MOCK_IMAGES = [
@@ -25,14 +26,11 @@ async def list_images(request):
     limit = params.get("limit", 10)
     offset = params.get("offset", 0)
 
-    images = MOCK_IMAGES[offset:offset + limit]
+    images = MOCK_IMAGES[offset : offset + limit]
 
-    return web.json_response({
-        "images": images,
-        "total": len(MOCK_IMAGES),
-        "limit": limit,
-        "offset": offset
-    })
+    return web.json_response(
+        {"images": images, "total": len(MOCK_IMAGES), "limit": limit, "offset": offset}
+    )
 
 
 async def get_image(request):
@@ -44,18 +42,17 @@ async def get_image(request):
 
     if image:
         # 模拟返回图片数据（base64）
-        return web.json_response({
-            "id": image_id,
-            "file_name": image["file_name"],
-            "label": image["label"],
-            "data": "base64_encoded_image_data_here...",
-            "url": f"http://localhost:8080/images/{image['file_name']}"
-        })
-    else:
         return web.json_response(
-            {"error": "Image not found"},
-            status=404
+            {
+                "id": image_id,
+                "file_name": image["file_name"],
+                "label": image["label"],
+                "data": "base64_encoded_image_data_here...",
+                "url": f"http://localhost:8080/images/{image['file_name']}",
+            }
         )
+    else:
+        return web.json_response({"error": "Image not found"}, status=404)
 
 
 async def health(request):
@@ -78,16 +75,16 @@ async def main():
     site = web.TCPSite(runner, "localhost", 8080)
     await site.start()
 
-    print("="*50)
+    print("=" * 50)
     print("外部执行器服务已启动")
-    print("="*50)
+    print("=" * 50)
     print("API 端点:")
     print("  POST /api/coco/list_images - 列出图片")
     print("  POST /api/coco/get_image    - 获取图片")
     print("  GET  /health                - 健康检查")
     print()
     print("监听: http://localhost:8080")
-    print("="*50)
+    print("=" * 50)
 
     # 保持运行
     while True:

@@ -5,9 +5,10 @@
 - subagent1 注册一个数据服务（只管理，不执行）
 - 实际业务由外部服务处理（如 n8n webhook 或 python 服务）
 """
+
 import asyncio
-import sys
 import os
+import sys
 
 # 添加项目根目录到 path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,28 +32,22 @@ async def main():
                 "description": "列出可用的图片",
                 "parameters": {
                     "limit": {"type": "integer", "default": 10, "max": 100},
-                    "offset": {"type": "integer", "default": 0}
+                    "offset": {"type": "integer", "default": 0},
                 },
                 "returns": {
                     "images": [{"id": "string", "url": "string", "label": "string"}],
-                    "total": "integer"
-                }
+                    "total": "integer",
+                },
             },
             {
                 "name": "get_image",
                 "description": "获取单张图片",
-                "parameters": {
-                    "id": {"type": "string", "required": True}
-                },
-                "returns": {
-                    "id": "string",
-                    "url": "string",
-                    "data": "base64"
-                }
-            }
+                "parameters": {"id": {"type": "string", "required": True}},
+                "returns": {"id": "string", "url": "string", "data": "base64"},
+            },
         ],
         "data_source": "~/data/dataset/coco/images/val2017",
-        "authentication": "none"
+        "authentication": "none",
     }
 
     # 创建纯管理型客户端
@@ -65,7 +60,7 @@ async def main():
         emoji="🖼️",
         execution_mode="external",  # 关键：external 表示外部执行
         interface_spec=interface_spec,
-        hub_url="ws://localhost:8765"
+        hub_url="ws://localhost:8765",
     )
 
     # 注册回调：当用户请求建立通道时
@@ -93,9 +88,9 @@ async def main():
         await client.connect()
 
         # 保持运行
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("Subagent1 运行中...")
-        print("="*50)
+        print("=" * 50)
         print("服务已注册，等待 subagent2 查询和调用")
         print("按 Ctrl+C 停止")
 
