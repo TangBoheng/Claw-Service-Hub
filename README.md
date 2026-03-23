@@ -60,6 +60,39 @@ Server listens on `ws://localhost:8765`
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Cloud Skill Registry (Option B)
+
+In addition to local skill management, Claw Service Hub supports **Cloud-based Skill Registry** for large-scale deployments.
+
+#### Core Advantages
+
+| Advantage | Description |
+|-----------|-------------|
+| **High Scalability** | Dynamic registration & discovery, supports hundreds/thousands of tools, multi-team friendly |
+| **Low Context Load** | Local only keeps router skill, dynamically pulls schema on-demand, saves tokens |
+| **Strong Governance** | RBAC, call auditing, SLA/rate limiting |
+| **Low Maintenance** | Server-side updates, easy grayscale release & rollback |
+| **High Security** | Central API Gateway control, Zero Trust architecture |
+
+#### Architecture
+
+```
+LLM Agent → Router Skill (Local) → Cloud Registry → Services
+```
+
+#### Comparison
+
+| Approach | Use Case |
+|----------|----------|
+| **Option A (Local)** | Offline environments, <20 skills, latency-sensitive |
+| **Option B (Cloud)** | >50 skills, multi-team, requires permission control |
+
+#### Recommended: Hybrid (80% B + 20% A)
+
+Cloud-first with local fallback for offline resilience.
+
+---
+
 ### Project Structure
 
 ```
@@ -146,6 +179,39 @@ Claw-Service-Hub/
 ├── skills/           # Skill 定义
 └── examples/         # 示例服务
 ```
+
+### 云端 Skill Registry (方案 B)
+
+除本地 skill 管理外，Claw Service Hub 还支持**云端 Skill Registry**，适用于大规模部署场景。
+
+#### 核心优势
+
+| 优势 | 描述 |
+|------|------|
+| **高可扩展性** | 动态注册/发现，支持数百/数千工具，天然支持多团队 |
+| **低上下文负载** | 本地只保留 router skill，动态按需拉取 schema，节省 token |
+| **强治理能力** | 支持 RBAC 权限控制、调用审计、SLA/限流 |
+| **低维护成本** | 服务端统一更新，灰度发布/回滚容易 |
+| **高安全性** | 中央 API Gateway 控制，零信任架构 |
+
+#### 架构图
+
+```
+LLM Agent → Router Skill (本地) → Cloud Registry → Services
+```
+
+#### 对比定位
+
+| 方案 | 适用场景 |
+|------|----------|
+| **方案 A (本地)** | 离线环境，<20 skills，延迟敏感 |
+| **方案 B (云端)** | >50 skills，多团队，需要权限控制 |
+
+#### 推荐架构：Hybrid (80% B + 20% A)
+
+云端为主 + 本地 fallback，离线可用
+
+---
 
 ### 功能列表
 
