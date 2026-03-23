@@ -140,3 +140,4 @@ asyncio.run(main())
 - 🔌 [External Executor](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/external_executor.py) - 外部执行器
 - 👤 [Subagent1 Management](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/subagent1_management_only.py) - 管理型客户端
 - 🔍 [Subagent2 Consumer](https://github.com/TangBoheng/Claw-Service-Hub/blob/main/examples/subagent2_skill_consumer.py) - 消费型客户端
+- 👔 [实战案例：每日穿衣推荐](daily-recommendation.md) - 完整的多代理工作流示例

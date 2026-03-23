@@ -33,12 +33,16 @@ try:
     from server.rating import RatingManager, get_rating_manager
     from server.registry import ServiceRegistry, ToolService, get_registry
     from server.tunnel import TunnelManager, get_tunnel_manager
+    from server.user_manager import UserManager, user_manager
+    from server.chat_channel import ChatChannelManager, get_channel_manager
 except ImportError:
     # 备用: 直接导入 (当 PYTHONPATH 正确设置时)
     from key_manager import KeyManager, key_manager
     from rating import RatingManager, get_rating_manager
     from registry import ServiceRegistry, ToolService, get_registry
     from tunnel import TunnelManager, get_tunnel_manager
+    from user_manager import UserManager, user_manager
+    from chat_channel import ChatChannelManager, get_channel_manager
 
 
 # 新增：导入管理客户端和通道管理
@@ -65,6 +69,8 @@ class HubServer:
         self.registry = get_registry()
         self.tunnel_mgr = get_tunnel_manager()
         self.rating_mgr = get_rating_manager()
+        self.user_mgr = user_manager  # 用户管理器
+        self.chat_channel_mgr = get_channel_manager()  # Chat 频道管理器
         self.clients: Set[ServerConnection] = set()
         self.running = False
 
@@ -73,6 +79,16 @@ class HubServer:
         self._key_request_map: Dict[str, str] = {}  # forward_request_id -> original_request_id
         self._client_info: Dict[str, dict] = {}  # client_id -> {type, service_id}
         self._pending_channels: Dict[str, dict] = {}  # request_id -> channel_request
+        # 用户会话: client_id -> user_id (用于追踪连接的用户身份)
+        self._client_user_map: Dict[str, str] = {}
+        # Chat 消息队列: message_id -> message data
+        self._chat_messages: Dict[str, dict] = {}
+        # Trade 挂牌存储: listing_id -> listing
+        self._listings: Dict[str, dict] = {}
+        # Trade 出价存储: bid_id -> bid
+        self._bids: Dict[str, dict] = {}
+        # Trade 议价存储: offer_id -> offer
+        self._offers: Dict[str, dict] = {}
         self.tunnel_mgr.on("request", self._on_tunnel_request)
 
     async def start(self):
@@ -108,6 +124,12 @@ class HubServer:
                 "/api/services/{service_id}/ratings", self._handle_api_service_ratings
             )
             app.router.add_post("/api/ratings", self._handle_api_add_rating)
+
+            # === 用户管理 API ===
+            app.router.add_post("/api/users", self._handle_api_create_user)
+            app.router.add_get("/api/users", self._handle_api_list_users)
+            app.router.add_get("/api/users/{user_id}", self._handle_api_get_user)
+            app.router.add_post("/api/users/auth", self._handle_api_auth_user)
 
             runner = web.AppRunner(app)
             await runner.setup()
@@ -236,6 +258,66 @@ class HubServer:
                 # 查询 Key 列表
                 await self._handle_key_list(websocket, client_id, message)
 
+            # === 用户注册与认证相关 ===
+            elif msg_type == "user_register":
+                # 用户注册
+                await self._handle_user_register(websocket, client_id, message)
+
+            elif msg_type == "user_auth":
+                # 用户认证（API Key 验证）
+                await self._handle_user_auth(websocket, client_id, message)
+
+            elif msg_type == "user_list":
+                # 查询用户列表（需要管理员权限）
+                await self._handle_user_list(websocket, client_id, message)
+
+            # === 用户访问控制相关 ===
+            elif msg_type == "user_grant_access":
+                # 服务提供者授予用户访问权限
+                await self._handle_user_grant_access(websocket, client_id, message)
+
+            elif msg_type == "user_revoke_access":
+                # 服务提供者撤销用户访问权限
+                await self._handle_user_revoke_access(websocket, client_id, message)
+
+            # === Chat 通讯相关 ===
+            elif msg_type == "chat_message":
+                # Chat 消息处理
+                await self._handle_chat_message(websocket, client_id, message)
+
+            elif msg_type == "chat_history":
+                # 获取聊天历史
+                await self._handle_chat_history(websocket, client_id, message)
+
+            # === Trade 交易相关 ===
+            elif msg_type == "listing_create":
+                # 创建挂牌
+                await self._handle_listing_create(websocket, client_id, message)
+
+            elif msg_type == "listing_query":
+                # 查询挂牌
+                await self._handle_listing_query(websocket, client_id, message)
+
+            elif msg_type == "bid_create":
+                # 创建出价
+                await self._handle_bid_create(websocket, client_id, message)
+
+            elif msg_type == "bid_accept":
+                # 接受出价
+                await self._handle_bid_accept(websocket, client_id, message)
+
+            elif msg_type == "negotiation_offer":
+                # 议价出价
+                await self._handle_negotiation_offer(websocket, client_id, message)
+
+            elif msg_type == "negotiation_counter":
+                # 议价还价
+                await self._handle_negotiation_counter(websocket, client_id, message)
+
+            elif msg_type == "negotiation_accept":
+                # 接受议价
+                await self._handle_negotiation_accept(websocket, client_id, message)
+
             else:
                 print(f"[Server] Unknown message type: {msg_type}")
 
@@ -261,6 +343,7 @@ class HubServer:
             requires=service_data.get("requires", {}),
             execution_mode=service_data.get("execution_mode", "local"),
             interface_spec=service_data.get("interface_spec", {}),
+            allowed_users=service_data.get("allowed_users", []),  # 用户访问控制
         )
 
         # 设置提供者信息
@@ -278,6 +361,12 @@ class HubServer:
         service.id = service_id
         self.registry._services[service_id] = service
 
+        # 创建 Chat 频道（服务注册时自动创建）
+        channel = self.chat_channel_mgr.create_channel(
+            service_id=service_id,
+            provider_id=client_id,
+        )
+
         # 响应客户端
         await websocket.send(
             json.dumps(
@@ -285,6 +374,7 @@ class HubServer:
                     "type": "registered",
                     "service_id": service_id,
                     "tunnel_id": tunnel.id,
+                    "channel_id": channel.channel_id,
                     "status": "online",
                 }
             )
@@ -295,6 +385,7 @@ class HubServer:
             service_name=service.name,
             service_id=service_id,
             tunnel_id=tunnel.id,
+            channel_id=channel.channel_id,
             execution_mode=service.execution_mode,
             client_type=client_type,
         )
@@ -572,47 +663,44 @@ class HubServer:
         method = message.get("method")
         params = message.get("params", {})
         key = message.get("key")  # 可选：Key 验证
+        client_id = message.get("client_id")  # 客户端 ID，用于用户验证
 
         if not tunnel_id or not request_id:
             print(f"[Server] Invalid call_service message: {message}")
             return
 
-        # 如果提供了 Key，验证 Key
+        # 获取 service_id (从 tunnel 获取)
+        service_id = None
+        for svc in self.registry.list_all():
+            if svc.tunnel_id == tunnel_id:
+                service_id = svc.id
+                break
+
+        if not service_id:
+            print(f"[Server] Service not found for tunnel {tunnel_id}")
+            return
+
+        # 用户验证（如果服务设置了 allowed_users）
+        user_result = self._verify_user_for_call(service_id, client_id)
+        if not user_result.get("valid"):
+            # 用户无权访问
+            print(f"[Server] 用户验证失败: {user_result.get('reason')}")
+            # 这里需要发送错误响应，但由于我们不知道发送到哪里，先打印
+            return
+
+        # Key 验证（如果提供了 Key）
         if key:
-            # 获取 service_id (从 tunnel 获取)
-            service_id = None
-            for svc in self.registry.list_all():
-                if svc.tunnel_id == tunnel_id:
-                    service_id = svc.id
-                    break
+            result = key_manager.verify_key(key, service_id)
+            if not result.get("valid"):
+                # Key 无效，拒绝调用
+                print(f"[Server] Key验证失败: {result.get('reason')}")
+                return
 
-            if service_id:
-                result = key_manager.verify_key(key, service_id)
-                if not result.get("valid"):
-                    # Key 无效，拒绝调用
-                    for ws in self._client_websockets.values():
-                        try:
-                            await ws.send(
-                                json.dumps(
-                                    {
-                                        "type": "service_response",
-                                        "request_id": request_id,
-                                        "response": {
-                                            "error": f"Key验证失败: {result.get('reason')}"
-                                        },
-                                    }
-                                )
-                            )
-                        except:
-                            pass
-                    print(f"[Server] Key验证失败: {result.get('reason')}")
-                    return
-
-                # Key 有效，扣减次数
-                key_manager.use_key(key)
-                print(
-                    f"[Server] Key验证成功，剩余次数: {key_manager.get_key_info(key).get('remaining_calls')}"
-                )
+            # Key 有效，扣减次数
+            key_manager.use_key(key)
+            print(
+                f"[Server] Key验证成功，剩余次数: {key_manager.get_key_info(key).get('remaining_calls')}"
+            )
 
         # 通过 tunnel manager 转发请求
         success = await self.tunnel_mgr.forward_request(
@@ -753,6 +841,45 @@ class HubServer:
             tags=data.get("tags", []),
         )
         return web.json_response(rating.to_dict())
+
+    # ========== 用户管理 API 处理函数 ==========
+
+    async def _handle_api_create_user(self, request):
+        """POST /api/users - 创建用户"""
+        from aiohttp import web
+
+        data = await request.json()
+        name = data.get("name")
+        user = self.user_mgr.create_user(name=name)
+        return web.json_response(user.to_dict())
+
+    async def _handle_api_list_users(self, request):
+        """GET /api/users - 列出用户"""
+        from aiohttp import web
+
+        users = self.user_mgr.list_users(active_only=False)
+        return web.json_response({"users": users})
+
+    async def _handle_api_get_user(self, request):
+        """GET /api/users/{user_id} - 获取用户信息"""
+        from aiohttp import web
+
+        user_id = request.match_info["user_id"]
+        user = self.user_mgr.get_user(user_id)
+        if not user:
+            return web.json_response({"error": "用户不存在"}, status=404)
+        return web.json_response(user.to_metadata_dict())
+
+    async def _handle_api_auth_user(self, request):
+        """POST /api/users/auth - 验证用户 API Key"""
+        from aiohttp import web
+
+        data = await request.json()
+        api_key = data.get("api_key")
+        result = self.user_mgr.verify_api_key(api_key)
+        if not result["valid"]:
+            return web.json_response({"valid": False, "reason": result["reason"]}, status=401)
+        return web.json_response({"valid": True, "user": result["user"].to_metadata_dict()})
 
     # ========== Key 授权处理函数 ==========
 
@@ -947,6 +1074,677 @@ class HubServer:
             return {"valid": False, "reason": "需要 Key"}
 
         return key_manager.verify_key(key, service_id)
+
+    # ========== 用户管理处理方法 ==========
+
+    async def _handle_user_register(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理用户注册"""
+        name = message.get("name")
+        user = self.user_mgr.create_user(name=name)
+
+        print(f"[Server] 用户注册: {user.user_id} (name={user.name})")
+
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "user_register_response",
+                    "success": True,
+                    "user": user.to_dict(),
+                }
+            )
+        )
+
+    async def _handle_user_auth(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理用户认证（API Key 验证）"""
+        api_key = message.get("api_key")
+        result = self.user_mgr.verify_api_key(api_key)
+
+        if result["valid"]:
+            # 记录用户会话
+            user_id = result["user"].user_id
+            self._client_user_map[client_id] = user_id
+
+            print(f"[Server] 用户认证成功: {user_id}")
+
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_auth_response",
+                        "success": True,
+                        "user": result["user"].to_metadata_dict(),
+                    }
+                )
+            )
+        else:
+            print(f"[Server] 用户认证失败: {result['reason']}")
+
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_auth_response",
+                        "success": False,
+                        "reason": result["reason"],
+                    }
+                )
+            )
+
+    async def _handle_user_list(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理查询用户列表"""
+        users = self.user_mgr.list_users(active_only=True)
+
+        await websocket.send(json.dumps({"type": "user_list_response", "users": users}))
+
+    async def _handle_user_grant_access(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理服务提供者授予用户访问权限"""
+        service_id = message.get("service_id")
+        user_id = message.get("user_id")
+
+        # 获取服务
+        service = self.registry.get(service_id)
+        if not service:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_grant_access_response",
+                        "success": False,
+                        "reason": "服务不存在",
+                    }
+                )
+            )
+            return
+
+        # 检查客户端是否有权管理该服务（必须是服务提供者）
+        client_info = self._client_info.get(client_id, {})
+        if client_info.get("service_id") != service_id:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_grant_access_response",
+                        "success": False,
+                        "reason": "无权限管理此服务",
+                    }
+                )
+            )
+            return
+
+        # 添加用户到允许列表
+        if user_id not in service.allowed_users:
+            service.allowed_users.append(user_id)
+            print(f"[Server] 授权用户 {user_id} 访问服务 {service_id}")
+
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_grant_access_response",
+                        "success": True,
+                        "service_id": service_id,
+                        "user_id": user_id,
+                    }
+                )
+            )
+        else:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_grant_access_response",
+                        "success": True,
+                        "reason": "用户已有访问权限",
+                    }
+                )
+            )
+
+    async def _handle_user_revoke_access(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理服务提供者撤销用户访问权限"""
+        service_id = message.get("service_id")
+        user_id = message.get("user_id")
+
+        # 获取服务
+        service = self.registry.get(service_id)
+        if not service:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_revoke_access_response",
+                        "success": False,
+                        "reason": "服务不存在",
+                    }
+                )
+            )
+            return
+
+        # 检查客户端是否有权管理该服务
+        client_info = self._client_info.get(client_id, {})
+        if client_info.get("service_id") != service_id:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_revoke_access_response",
+                        "success": False,
+                        "reason": "无权限管理此服务",
+                    }
+                )
+            )
+            return
+
+        # 从允许列表中移除用户
+        if user_id in service.allowed_users:
+            service.allowed_users.remove(user_id)
+            print(f"[Server] 撤销用户 {user_id} 对服务 {service_id} 的访问权限")
+
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_revoke_access_response",
+                        "success": True,
+                        "service_id": service_id,
+                        "user_id": user_id,
+                    }
+                )
+            )
+        else:
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "user_revoke_access_response",
+                        "success": True,
+                        "reason": "用户没有访问权限",
+                    }
+                )
+            )
+
+    def _verify_user_for_call(self, service_id: str, client_id: str = None) -> dict:
+        """验证用户是否有权访问服务
+        
+        Args:
+            service_id: 服务 ID
+            client_id: 客户端 ID（用于获取用户身份）
+            
+        Returns:
+            {"valid": bool, "reason": str, "user_id": str or None}
+        """
+        # 获取服务
+        service = self.registry.get(service_id)
+        if not service:
+            return {"valid": False, "reason": "服务不存在", "user_id": None}
+
+        # 如果服务没有设置 allowed_users（空列表），则允许所有用户访问
+        if not service.allowed_users:
+            return {"valid": True, "reason": "", "user_id": self._client_user_map.get(client_id)}
+
+        # 获取客户端关联的用户
+        user_id = self._client_user_map.get(client_id)
+        if not user_id:
+            return {"valid": False, "reason": "用户未认证", "user_id": None}
+
+        # 检查用户是否在允许列表中
+        if user_id not in service.allowed_users:
+            return {"valid": False, "reason": "无权限访问此服务", "user_id": user_id}
+
+        return {"valid": True, "reason": "", "user_id": user_id}
+
+    # ========== Chat 消息处理函数 ==========
+
+    async def _handle_chat_message(
+        self, websocket: ServerConnection, client_id: str, message: dict
+    ):
+        """处理 Chat 消息"""
+        message_id = message.get("message_id")
+        sender_id = message.get("sender_id", client_id)
+        target_agent = message.get("target_agent")
+        service_id = message.get("service_id")
+        content = message.get("content", "")
+
+        # 添加时间戳
+        message["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        # 存储消息
+        self._chat_messages[message_id] = message
+
+        # 通过 service_id 查找频道和目标
+        if service_id:
+            channel = self.chat_channel_mgr.get_channel_by_service(service_id)
+            if channel:
+                # 转发给 Provider
+                provider_ws = self._client_websockets.get(channel.provider_id)
+                if provider_ws:
+                    await provider_ws.send(json.dumps({
+                        "type": "chat_message",
+                        "message_id": message_id,
+                        "sender_id": sender_id,
+                        "service_id": service_id,
+                        "content": content,
+                        "timestamp": message["timestamp"],
+                    }))
+
+                # 如果有 consumer，也转发
+                if channel.consumer_id:
+                    consumer_ws = self._client_websockets.get(channel.consumer_id)
+                    if consumer_ws:
+                        await consumer_ws.send(json.dumps({
+                            "type": "chat_message",
+                            "message_id": message_id,
+                            "sender_id": sender_id,
+                            "service_id": service_id,
+                            "content": content,
+                            "timestamp": message["timestamp"],
+                        }))
+
+                print(f"[Server] Chat message forwarded via channel {channel.channel_id}")
+                return
+
+        # 直接通过 target_agent 转发
+        if target_agent:
+            target_ws = self._client_websockets.get(target_agent)
+            if target_ws:
+                await target_ws.send(json.dumps(message))
+                print(f"[Server] Chat message forwarded to {target_agent}")
+                return
+            else:
+                print(f"[Server] Target agent {target_agent} not found")
+
+        # 响应发送者确认收到
+        await websocket.send(json.dumps({
+            "type": "chat_message_ack",
+            "message_id": message_id,
+            "status": "delivered" if target_agent else "pending",
+        }))
+
+    async def _handle_chat_history(
+        self, websocket: ServerConnection, client_id: str, message: dict
+    ):
+        """处理获取 Chat 历史消息"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+        channel_id = message.get("channel_id")
+        limit = message.get("limit", 50)
+
+        # 查找频道
+        if channel_id:
+            channel = self.chat_channel_mgr.get_channel(channel_id)
+        elif service_id:
+            channel = self.chat_channel_mgr.get_channel_by_service(service_id)
+        else:
+            channel = None
+
+        # 获取该频道的所有消息
+        messages = []
+        if channel:
+            # 过滤该频道相关的消息（通过 service_id）
+            for msg in self._chat_messages.values():
+                if msg.get("service_id") == channel.service_id:
+                    messages.append(msg)
+
+        # 限制数量
+        messages = messages[-limit:]
+
+        # 响应给客户端
+        await websocket.send(json.dumps({
+            "type": "chat_history_response",
+            "request_id": request_id,
+            "channel_id": channel_id or (channel.channel_id if channel else None),
+            "service_id": service_id,
+            "messages": messages,
+            "total": len(messages),
+        }))
+
+        print(f"[Server] Chat history: {len(messages)} messages for {service_id or channel_id}")
+
+    # ========== Trade 交易处理方法 ==========
+
+    async def _handle_listing_create(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理创建挂牌"""
+        # 验证必填字段
+        required_fields = ["listing_id", "title", "price"]
+        missing = [f for f in required_fields if not message.get(f)]
+        if missing:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_FIELDS",
+                "message": f"Missing required fields: {missing}",
+                "details": "listing_id, title, and price are required"
+            }))
+            return
+            
+        price = message.get("price")
+        if not isinstance(price, (int, float)) or price <= 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a positive number"
+            }))
+            return
+            
+        listing_id = message.get("listing_id")
+        listing = {
+            "listing_id": listing_id,
+            "agent_id": message.get("agent_id"),
+            "title": message.get("title"),
+            "description": message.get("description"),
+            "price": price,
+            "category": message.get("category", "service"),
+            "status": "active",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._listings[listing_id] = listing
+        await websocket.send(json.dumps({
+            "type": "listing_created",
+            "listing_id": listing_id,
+            "status": "active",
+        }))
+        print(f"[Server] Listing created: {listing_id} by {listing['agent_id']}")
+
+    async def _handle_listing_query(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理查询挂牌"""
+        request_id = message.get("request_id")
+        category = message.get("category")
+        listings = [l for l in self._listings.values() if l.get("status") == "active"]
+        if category:
+            listings = [l for l in listings if l.get("category") == category]
+        await websocket.send(json.dumps({
+            "type": "listing_query_response",
+            "request_id": request_id,
+            "listings": listings,
+            "total": len(listings),
+        }))
+        print(f"[Server] Listing query: {len(listings)} results")
+
+    async def _handle_bid_create(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理创建出价"""
+        # 验证必填字段
+        required_fields = ["bid_id", "listing_id", "price"]
+        missing = [f for f in required_fields if not message.get(f)]
+        if missing:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_FIELDS",
+                "message": f"Missing required fields: {missing}",
+                "details": "bid_id, listing_id, and price are required"
+            }))
+            return
+            
+        bid_id = message.get("bid_id")
+        listing_id = message.get("listing_id")
+        listing = self._listings.get(listing_id)
+        
+        if not listing:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_FOUND",
+                "message": f"Listing not found: {listing_id}",
+                "details": "The listing does not exist or has been removed"
+            }))
+            return
+            
+        if listing.get("status") != "active":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_ACTIVE",
+                "message": f"Listing is not active: {listing.get('status')}",
+                "details": "Cannot bid on inactive listing"
+            }))
+            return
+            
+        price = message.get("price")
+        if not isinstance(price, (int, float)) or price <= 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a positive number"
+            }))
+            return
+            
+        bid = {
+            "bid_id": bid_id,
+            "listing_id": listing_id,
+            "agent_id": message.get("agent_id"),
+            "price": price,
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._bids[bid_id] = bid
+        # 通知挂牌所有者
+        owner_ws = self._client_websockets.get(listing.get("agent_id"))
+        if owner_ws:
+            await owner_ws.send(json.dumps({"type": "bid_received", "bid": bid}))
+        await websocket.send(json.dumps({"type": "bid_created", "bid_id": bid_id}))
+        print(f"[Server] Bid created: {bid_id} for listing {listing_id}")
+
+    async def _handle_bid_accept(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理接受出价"""
+        bid_id = message.get("bid_id")
+        if not bid_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_BID_ID",
+                "message": "Missing bid_id",
+                "details": "bid_id is required"
+            }))
+            return
+            
+        bid = self._bids.get(bid_id)
+        if not bid:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "BID_NOT_FOUND",
+                "message": f"Bid not found: {bid_id}",
+                "details": "The bid does not exist or has expired"
+            }))
+            return
+            
+        if bid.get("status") != "pending":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "BID_NOT_PENDING",
+                "message": f"Bid is not pending: {bid.get('status')}",
+                "details": "This bid has already been processed"
+            }))
+            return
+            
+        bid["status"] = "accepted"
+        listing_id = bid["listing_id"]
+        if listing_id in self._listings:
+            self._listings[listing_id]["status"] = "sold"
+        # 通知出价者
+        bidder_ws = self._client_websockets.get(bid.get("agent_id"))
+        if bidder_ws:
+            await bidder_ws.send(json.dumps({"type": "bid_accepted", "bid_id": bid_id}))
+        await websocket.send(json.dumps({"type": "bid_accept_response", "bid_id": bid_id, "status": "accepted"}))
+        print(f"[Server] Bid accepted: {bid_id}")
+
+    async def _handle_negotiation_offer(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理议价出价"""
+        request_id = message.get("request_id")
+        offer_id = message.get("offer_id")
+        listing_id = message.get("listing_id")
+        
+        # 验证 listing_id
+        if not listing_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_LISTING_ID",
+                "message": "Missing listing_id",
+                "details": "listing_id is required",
+                "request_id": request_id
+            }))
+            return
+            
+        listing = self._listings.get(listing_id)
+        if not listing:
+            await websocket.send(json.dumps({
+                "type": "error", 
+                "error_code": "LISTING_NOT_FOUND",
+                "message": f"Listing not found: {listing_id}",
+                "details": "The listing does not exist or has been removed",
+                "request_id": request_id
+            }))
+            return
+        
+        # 验证价格
+        price = message.get("price")
+        if price is None or not isinstance(price, (int, float)) or price <= 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a positive number",
+                "request_id": request_id
+            }))
+            return
+            
+        # 检查 listing 状态
+        if listing.get("status") != "active":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_ACTIVE",
+                "message": f"Listing is not active: {listing.get('status')}",
+                "details": "Cannot make offer on inactive listing",
+                "request_id": request_id
+            }))
+            return
+            
+        offer = {
+            "offer_id": offer_id,
+            "listing_id": listing_id,
+            "agent_id": message.get("agent_id"),
+            "price": price,
+            "type": "offer",
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._offers[offer_id] = offer
+        # 通知挂牌所有者
+        owner_ws = self._client_websockets.get(listing.get("agent_id"))
+        if owner_ws:
+            await owner_ws.send(json.dumps({"type": "negotiation_received", "offer": offer}))
+        await websocket.send(json.dumps({"type": "negotiation_sent", "offer_id": offer_id, "request_id": request_id}))
+        print(f"[Server] Negotiation offer: {offer_id}")
+
+    async def _handle_negotiation_counter(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理议价还价"""
+        request_id = message.get("request_id")
+        offer_id = message.get("offer_id")  # 这是客户端传来的原始 offer_id
+        original_offer = self._offers.get(offer_id)
+        if not original_offer:
+            await websocket.send(json.dumps({
+                "type": "error", 
+                "error_code": "OFFER_NOT_FOUND",
+                "message": f"Offer not found: {offer_id}",
+                "details": "The original offer ID does not exist or has expired",
+                "request_id": request_id
+            }))
+            return
+        
+        # 验证价格
+        price = message.get("price")
+        if price is None or not isinstance(price, (int, float)) or price <= 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a positive number",
+                "request_id": request_id
+            }))
+            return
+        
+        # 验证 listing_id
+        listing_id = message.get("listing_id")
+        if not listing_id or listing_id not in self._listings:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_FOUND",
+                "message": f"Listing not found: {listing_id}",
+                "details": "The listing ID does not exist",
+                "request_id": request_id
+            }))
+            return
+            
+        # 使用客户端提供的 offer_id 作为 counter 的 ID
+        # 这样客户端可以正确追踪其 counter offer
+        counter_id = offer_id  # 使用原始 offer_id 作为 counter ID（简化追踪）
+        
+        counter = {
+            "offer_id": counter_id,
+            "listing_id": listing_id,
+            "agent_id": message.get("agent_id"),
+            "price": price,
+            "type": "counter",
+            "parent_offer_id": offer_id,  # 保留对原始 offer 的引用
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        # 如果已存在相同 ID 的 offer，先删除旧的
+        if counter_id in self._offers:
+            del self._offers[counter_id]
+        
+        self._offers[counter_id] = counter
+        
+        # 通知原始出价者
+        original_agent = original_offer.get("agent_id")
+        original_ws = self._client_websockets.get(original_agent)
+        if original_ws:
+            await original_ws.send(json.dumps({
+                "type": "negotiation_counter", 
+                "offer": counter,
+                "parent_offer_id": offer_id  # 明确告知这是对哪个 offer 的还价
+            }))
+        
+        await websocket.send(json.dumps({
+            "type": "negotiation_counter_sent", 
+            "offer_id": counter_id,
+            "parent_offer_id": offer_id,
+            "request_id": request_id
+        }))
+        print(f"[Server] Negotiation counter: {counter_id} (parent: {offer_id})")
+
+    async def _handle_negotiation_accept(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理接受议价"""
+        request_id = message.get("request_id")
+        offer_id = message.get("offer_id")
+        if not offer_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_OFFER_ID",
+                "message": "Missing offer_id",
+                "details": "offer_id is required",
+                "request_id": request_id
+            }))
+            return
+            
+        offer = self._offers.get(offer_id)
+        if not offer:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "OFFER_NOT_FOUND",
+                "message": f"Offer not found: {offer_id}",
+                "details": "The offer does not exist or has expired",
+                "request_id": request_id
+            }))
+            return
+            
+        if offer.get("status") != "pending":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "OFFER_NOT_PENDING",
+                "message": f"Offer is not pending: {offer.get('status')}",
+                "details": "This offer has already been processed",
+                "request_id": request_id
+            }))
+            return
+            
+        offer["status"] = "accepted"
+        listing_id = offer["listing_id"]
+        if listing_id in self._listings:
+            self._listings[listing_id]["status"] = "sold"
+        # 通知出价者
+        offer_agent = offer.get("agent_id")
+        offer_ws = self._client_websockets.get(offer_agent)
+        if offer_ws:
+            await offer_ws.send(json.dumps({"type": "negotiation_accepted", "offer_id": offer_id}))
+        await websocket.send(json.dumps({"type": "negotiation_accept_response", "offer_id": offer_id, "status": "accepted", "request_id": request_id}))
+        print(f"[Server] Negotiation accepted: {offer_id}")
 
 
 def main():

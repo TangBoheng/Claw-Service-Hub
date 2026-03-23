@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Rate limiting module (`server/ratelimit.py`) for API request throttling
+- Input validation module (`server/validators.py`) with request validation
 - Health check endpoint (`/health`) for service monitoring
 - Structured logging with `server/logging_config.py`
 - SQLite-based data persistence (`server/storage.py`)
 - Comprehensive test suite with pytest
+- Code quality tools configuration (`ruff.toml`, `mypy.ini`)
 
 ### Changed
 - Upgraded to Python 3.10+ minimum requirement

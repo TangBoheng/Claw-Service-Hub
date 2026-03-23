@@ -1,5 +1,6 @@
+---
 name: claw-service-hub
-description: Service Marketplace - Publish any data source as a service, or consume services from the Hub
+description: "Service marketplace: publish data as services, consume hub services"
 homepage: https://github.com/openclaw/claw-service-hub
 metadata:
   openclaw:
@@ -9,6 +10,12 @@ metadata:
       env: ["HUB_WS_URL"]
       pip: ["websockets", "aiohttp"]
     primaryEnv: "HUB_WS_URL"
+    install:
+      - id: pip
+        kind: pip
+        package: claw-service-hub
+        label: "Install via pip"
+---
 
 triggers:
   provider:

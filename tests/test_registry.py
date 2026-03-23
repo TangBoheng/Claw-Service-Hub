@@ -168,6 +168,7 @@ def test_service_to_metadata_dict(sample_service):
         "tunnel_id",
         "execution_mode",
         "provider_client_id",
+            "allowed_users",  # 新增字段
     }
     assert set(metadata_dict.keys()) == expected_fields
     assert metadata_dict["id"] == "test-service"

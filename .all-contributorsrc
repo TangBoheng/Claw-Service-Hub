@@ -1,0 +1,50 @@
+# All Contributors specification
+
+This repository uses the [All Contributors](https://allcontributors.org/) specification.
+
+## Adding Contributors
+
+Run the following command to add a new contributor:
+
+```bash
+npx all-contributors-cli add <username> <contribution-types>
+```
+
+Example:
+```bash
+npx all-contributors-cli add TangBoheng code,doc,ideas
+```
+
+### Contribution Types
+
+| Emoji | Type | Description |
+|------|------|-------------|
+| 💻 | code | Code |
+| 📖 | doc | Documentation |
+| 🎨 | design | Design |
+| 📝 | maintenance | Maintenance |
+| 💡 | example | Examples |
+| 🚧 | test | Tests |
+| ⚠️ | bug | Bug reports |
+| 答疑 | question | Questions |
+| 🤔 | ideas | Ideas, Planning, & Feedback |
+| 🔍 | review | Code Review |
+| 🌍 | translation | Translation |
+| 💰 | financial | Financial contributions |
+| 🎉 | fond | Fond memory |
+
+## Checking Status
+
+```bash
+npx all-contributors-cli check
+```
+
+## Generating Table
+
+```bash
+npx all-contributors-cli generate
+```
+
+## More Information
+
+See [All Contributors Documentation](https://allcontributors.org/docs/en/overview)

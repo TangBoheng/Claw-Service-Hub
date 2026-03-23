@@ -32,6 +32,7 @@ nav:
   - API 参考: api.md
   - 示例:
       - examples/index.md
+      - examples/daily-recommendation.md
   - 部署: deployment.md
   - 架构:
       - multi_user_architecture.md

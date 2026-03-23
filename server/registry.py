@@ -41,6 +41,9 @@ class ToolService:
     executor_endpoint: Optional[str] = None  # 外部执行器地址（如n8n webhook）
     interface_spec: dict = None  # 接口规范 {"methods": [...], "schema": {...}}
 
+    # 用户访问控制
+    allowed_users: List[str] = None  # 允许访问此服务的用户 ID 列表（空列表表示允许所有用户）
+
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
@@ -50,6 +53,8 @@ class ToolService:
             self.requires = {}
         if self.interface_spec is None:
             self.interface_spec = {}
+        if self.allowed_users is None:
+            self.allowed_users = []
         if not self.registered_at:
             self.registered_at = datetime.now(timezone.utc).isoformat()
 
@@ -70,6 +75,7 @@ class ToolService:
             "tunnel_id": self.tunnel_id,
             "execution_mode": self.execution_mode,
             "provider_client_id": self.provider_client_id,
+            "allowed_users": self.allowed_users,  # 添加 allowed_users 到 metadata
         }
 
     def to_skill_descriptor(self) -> dict:
@@ -87,7 +93,23 @@ class ToolService:
             "execution_mode": self.execution_mode,
             "interface_spec": self.interface_spec,
             "status": self.status,
+            "allowed_users": self.allowed_users,  # 添加 allowed_users
         }
+
+    def can_access(self, user_id: str) -> bool:
+        """检查用户是否有权访问此服务
+        
+        Args:
+            user_id: 用户 ID
+            
+        Returns:
+            True 如果用户有权访问，False 否则
+        """
+        # 如果 allowed_users 为空列表或 None，表示允许所有用户访问
+        if not self.allowed_users:
+            return True
+        # 检查用户是否在允许列表中
+        return user_id in self.allowed_users
 
     @classmethod
     def from_dict(cls, data: dict) -> "ToolService":

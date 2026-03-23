@@ -141,6 +141,18 @@ class Storage:
                 )
             """)
 
+            # Users table (for UserManager persistence)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    api_key TEXT UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_active INTEGER DEFAULT 1
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key)")
+
     # ========== Service Operations ==========
 
     def save_service(self, service_data: Dict[str, Any]) -> None:
@@ -432,6 +444,58 @@ class Storage:
             with self._transaction() as conn:
                 cursor = conn.cursor()
                 cursor.execute("UPDATE key_lifecycle SET is_active = 0 WHERE key = ?", (key,))
+                return cursor.rowcount > 0
+
+    # ========== User Operations ==========
+
+    def save_user(self, user_data: Dict[str, Any]) -> None:
+        """
+        Save or update a user.
+
+        Args:
+            user_data: User data dictionary with: user_id, name, api_key, created_at, is_active
+        """
+        with self._write_lock:
+            with self._transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO users 
+                    (user_id, name, api_key, created_at, is_active)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (
+                        user_data.get("user_id"),
+                        user_data.get("name"),
+                        user_data.get("api_key"),
+                        user_data.get("created_at"),
+                        1 if user_data.get("is_active", True) else 0,
+                    ),
+                )
+
+    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user by user_id."""
+        conn = self._get_connection()
+        row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
+        """Get user by API key."""
+        conn = self._get_connection()
+        row = conn.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
+        return dict(row) if row else None
+
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        """Get all users."""
+        conn = self._get_connection()
+        rows = conn.execute("SELECT * FROM users").fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete a user."""
+        with self._write_lock:
+            with self._transaction() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
                 return cursor.rowcount > 0
 
     # ========== Utility Methods ==========

@@ -1,0 +1,51 @@
+# Ruff Linter Configuration for Claw-Service-Hub
+# https://docs.astral.sh/ruff/configuration/
+
+line-length = 100
+target-version = "py310"
+indent-width = 4
+
+# Enable auto-fixing
+fix = true
+
+[lint]
+# Select rules to enable
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ASYNC",  # flake8-async
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "C901",   # too complex (allow complex functions)
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["B011"]
+
+[lint.isort]
+known-first-party = ["server", "client"]
+force-single-line = false
+
+[lint.pyupgrade]
+# Keep percent format for string formatting
+keep-percent-format = true
+
+[lint.bugbear]
+# Allow mutable defaults in __init__
+mutable-classattr = false
+
+[format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

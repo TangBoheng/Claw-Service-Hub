@@ -27,11 +27,11 @@ dev = [
 ]
 
 [project.scripts]
-claw-hub = "server.main:main"
+csh = "claw_service_hub.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*", "client*"]
+include = ["server*", "client*", "claw_service_hub*"]
 
 [tool.black]
 line-length = 100
