@@ -344,6 +344,27 @@ Claw-Service-Hub/
 
 ---
 
+## 🤝 Contributing Flow
+
+We welcome contributions! Follow this simple flow to get started:
+
+```
+Fork → Clone → Create Branch → Commit → Push → PR
+```
+
+### Steps
+
+1. **Fork** the repository
+2. **Clone** your fork locally
+3. **Create** a new branch (`git checkout -b feature/your-feature`)
+4. **Commit** your changes (`git commit -m 'Add some feature'`)
+5. **Push** to your branch (`git push origin feature/your-feature`)
+6. **Create** a Pull Request
+
+For detailed instructions, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+---
+
 ## 🔗 Links
 
 - [📖 Documentation](https://claw-service-hub.readthedocs.io)
