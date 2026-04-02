@@ -11,7 +11,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.tunnel import Tunnel, TunnelManager
+from server.core.tunnel import Tunnel, TunnelManager
 
 
 @pytest.fixture

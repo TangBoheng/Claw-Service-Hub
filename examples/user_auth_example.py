@@ -6,7 +6,7 @@
 import asyncio
 import json
 from server.user_manager import user_manager
-from server.registry import ToolService
+from server.core.registry import ToolService
 from server.key_manager import key_manager
 
 

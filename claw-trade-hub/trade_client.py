@@ -156,6 +156,191 @@ class TradeClient:
         }))
         return True
 
+    # ========== 新增功能：TC009/TC010/TC011/TC012 ==========
+    
+    async def cancel_listing(self, listing_id: str) -> dict:
+        """
+        取消挂牌（TC009 取消订单）
+        
+        Args:
+            listing_id: 挂牌 ID
+            
+        Returns:
+            {"listing_id": str, "status": "cancelled"}
+        """
+        if not self.websocket:
+            await self.connect()
+        
+        request_id = f"req_{uuid.uuid4().hex[:8]}"
+        await self.websocket.send(json.dumps({
+            "type": "listing_cancel",
+            "request_id": request_id,
+            "listing_id": listing_id,
+            "agent_id": self.agent_id,
+        }))
+        
+        # 等待响应
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._message_queue.get(), timeout=5.0)
+                if msg.get("type") == "listing_cancelled":
+                    return {"listing_id": listing_id, "status": "cancelled"}
+                elif msg.get("type") == "error":
+                    return {"error": msg.get("message"), "details": msg.get("details")}
+            except asyncio.TimeoutError:
+                break
+        return {"error": "timeout"}
+
+    async def update_listing_price(self, listing_id: str, new_price: float) -> dict:
+        """
+        修改挂牌价格（TC010 修改价格）
+        
+        Args:
+            listing_id: 挂牌 ID
+            new_price: 新价格
+            
+        Returns:
+            {"listing_id": str, "old_price": float, "new_price": float, "status": "active"}
+        """
+        if not self.websocket:
+            await self.connect()
+        
+        if new_price <= 0:
+            return {"error": "Invalid price", "details": "Price must be positive"}
+        
+        request_id = f"req_{uuid.uuid4().hex[:8]}"
+        await self.websocket.send(json.dumps({
+            "type": "listing_update_price",
+            "request_id": request_id,
+            "listing_id": listing_id,
+            "price": new_price,
+            "agent_id": self.agent_id,
+        }))
+        
+        # 等待响应
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._message_queue.get(), timeout=5.0)
+                if msg.get("type") == "listing_price_updated":
+                    return {
+                        "listing_id": listing_id,
+                        "old_price": msg.get("old_price"),
+                        "new_price": msg.get("new_price"),
+                        "status": msg.get("status")
+                    }
+                elif msg.get("type") == "error":
+                    return {"error": msg.get("message"), "details": msg.get("details")}
+            except asyncio.TimeoutError:
+                break
+        return {"error": "timeout"}
+
+    async def cancel_listings_batch(self, listing_ids: list) -> dict:
+        """
+        批量下架（TC011 批量下架）
+        
+        Args:
+            listing_ids: 挂牌 ID 列表
+            
+        Returns:
+            {"results": list, "total": int, "success_count": int}
+        """
+        if not self.websocket:
+            await self.connect()
+        
+        if not listing_ids:
+            return {"error": "No listing_ids provided"}
+        
+        request_id = f"req_{uuid.uuid4().hex[:8]}"
+        await self.websocket.send(json.dumps({
+            "type": "listing_cancel_batch",
+            "request_id": request_id,
+            "listing_ids": listing_ids,
+            "agent_id": self.agent_id,
+        }))
+        
+        # 等待响应
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._message_queue.get(), timeout=10.0)
+                if msg.get("type") == "listing_cancelled_batch":
+                    return {
+                        "results": msg.get("results", []),
+                        "total": msg.get("total", 0),
+                        "success_count": msg.get("success_count", 0)
+                    }
+                elif msg.get("type") == "error":
+                    return {"error": msg.get("message"), "details": msg.get("details")}
+            except asyncio.TimeoutError:
+                break
+        return {"error": "timeout"}
+
+    async def get_transaction_history(self, query_type: str = "all") -> dict:
+        """
+        查询消费记录（TC012 查询消费记录）
+        
+        Args:
+            query_type: 查询类型 "all"(全部), "bought"(购买), "sold"(销售)
+            
+        Returns:
+            {"transactions": list, "total": int, "total_spent": float, "total_earned": float}
+        """
+        if not self.websocket:
+            await self.connect()
+        
+        request_id = f"req_{uuid.uuid4().hex[:8]}"
+        await self.websocket.send(json.dumps({
+            "type": "transaction_query",
+            "request_id": request_id,
+            "query_type": query_type,
+            "agent_id": self.agent_id,
+        }))
+        
+        # 等待响应
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._message_queue.get(), timeout=5.0)
+                if msg.get("type") == "transaction_query_response":
+                    return {
+                        "transactions": msg.get("transactions", []),
+                        "total": msg.get("total", 0),
+                        "total_spent": msg.get("total_spent", 0),
+                        "total_earned": msg.get("total_earned", 0),
+                        "query_type": msg.get("query_type")
+                    }
+                elif msg.get("type") == "error":
+                    return {"error": msg.get("message"), "details": msg.get("details")}
+            except asyncio.TimeoutError:
+                break
+        return {"error": "timeout"}
+
+    async def create_transaction(self, listing_id: str, buyer_id: str, seller_id: str, price: float) -> str:
+        """
+        创建交易记录（内部使用，bid/议价成交时调用）
+        
+        Args:
+            listing_id: 挂牌 ID
+            buyer_id: 买家 ID
+            seller_id: 卖家 ID
+            price: 成交价格
+            
+        Returns:
+            transaction_id
+        """
+        if not self.websocket:
+            await self.connect()
+        
+        transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+        await self.websocket.send(json.dumps({
+            "type": "transaction_create",
+            "transaction_id": transaction_id,
+            "listing_id": listing_id,
+            "buyer_id": buyer_id,
+            "seller_id": seller_id,
+            "price": price,
+        }))
+        
+        return transaction_id
+
     async def offers(self) -> AsyncGenerator[dict, None]:
         """监听报价/议价消息"""
         while self._running:

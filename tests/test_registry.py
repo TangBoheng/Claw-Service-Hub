@@ -12,7 +12,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.registry import ServiceRegistry, ToolService
+from server.core.registry import ServiceRegistry, ToolService
 
 
 @pytest.fixture
@@ -168,7 +168,10 @@ def test_service_to_metadata_dict(sample_service):
         "tunnel_id",
         "execution_mode",
         "provider_client_id",
-            "allowed_users",  # 新增字段
+        "owner",  # P0: 服务所有者
+        "price",  # P0: 服务价格
+        "price_unit",  # P0: 价格单位
+        "allowed_users",
     }
     assert set(metadata_dict.keys()) == expected_fields
     assert metadata_dict["id"] == "test-service"

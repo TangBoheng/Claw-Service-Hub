@@ -31,8 +31,8 @@ if __name__ == "__main__":
 try:
     from server.key_manager import KeyManager, key_manager
     from server.rating import RatingManager, get_rating_manager
-    from server.registry import ServiceRegistry, ToolService, get_registry
-    from server.tunnel import TunnelManager, get_tunnel_manager
+    from server.core.registry import ServiceRegistry, ToolService, get_registry
+    from server.core.tunnel import TunnelManager, get_tunnel_manager
     from server.user_manager import UserManager, user_manager
     from server.chat_channel import ChatChannelManager, get_channel_manager
 except ImportError:
@@ -89,6 +89,8 @@ class HubServer:
         self._bids: Dict[str, dict] = {}
         # Trade 议价存储: offer_id -> offer
         self._offers: Dict[str, dict] = {}
+        # Trade 交易记录存储: transaction_id -> transaction
+        self._transactions: Dict[str, dict] = {}
         self.tunnel_mgr.on("request", self._on_tunnel_request)
 
     async def start(self):
@@ -100,11 +102,7 @@ class HubServer:
         asyncio.create_task(self._cleanup_loop())
 
         logger.info(
-            "server_started",
-            version=__version__,
-            websocket_url=f"ws://{self.host}:{self.port}",
-            rest_api_url=f"http://{self.host}:{self.port - 5000}",
-            health_url=f"http://{self.host}:{self.port - 5000}/health",
+            f"server_started - version={__version__}, ws={self.host}:{self.port}, http={self.host}:{self.port - 5000}"
         )
 
         # 启动 WebSocket 服务器
@@ -136,11 +134,11 @@ class HubServer:
             site = web.TCPSite(runner, self.host, self.port - 5000)
             await site.start()
 
-            logger.info("http_rest_api_started", url=f"http://{self.host}:{self.port - 5000}")
+            logger.info(f"http_rest_api_started - http://{self.host}:{self.port - 5000}")
         except ImportError:
-            logger.warning("http_rest_api_disabled", reason="aiohttp not installed")
+            logger.warning(f"http_rest_api_disabled - aiohttp not installed")
         except Exception as e:
-            logger.error("http_rest_api_failed", error=str(e))
+            logger.error(f"http_rest_api_failed - {str(e)}")
 
         async with ws_server:
             await asyncio.Future()  # 永远运行
@@ -156,7 +154,7 @@ class HubServer:
         # 新的 websockets 库不再传递 path 参数
         path = ""
         client_id = str(uuid.uuid4())[:8]
-        logger.info("client_connected", client_id=client_id)
+        logger.info(f"client_connected - {client_id}")
 
         self.clients.add(websocket)
 
@@ -167,9 +165,9 @@ class HubServer:
             async for message in websocket:
                 await self._process_message(websocket, client_id, message)
         except websockets.exceptions.ConnectionClosed:
-            logger.info("client_disconnected", client_id=client_id)
+            logger.info(f"client_disconnected: {client_id}")
         except Exception as e:
-            logger.error("client_error", client_id=client_id, error=str(e))
+            logger.error(f"client_error: {client_id}, error: {str(e)}")
         finally:
             self.clients.discard(websocket)
             # 清理 client_id 映射
@@ -235,6 +233,10 @@ class HubServer:
 
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))
+
+            elif msg_type == "help":
+                # 帮助命令 (TC007)
+                await self._handle_help(websocket, client_id, message)
 
             # === Key 授权相关 ===
             elif msg_type == "lifecycle_policy":
@@ -318,6 +320,38 @@ class HubServer:
                 # 接受议价
                 await self._handle_negotiation_accept(websocket, client_id, message)
 
+            elif msg_type == "rate":
+                # 服务评分
+                await self._handle_rate(websocket, client_id, message)
+
+            elif msg_type == "get_rating":
+                # 获取服务评分
+                await self._handle_get_rating(websocket, client_id, message)
+
+            elif msg_type == "listing_cancel":
+                # 取消挂牌/订单（TC009）
+                await self._handle_listing_cancel(websocket, client_id, message)
+
+            elif msg_type == "listing_update_price":
+                # 修改挂牌价格（TC010）
+                await self._handle_listing_update_price(websocket, client_id, message)
+
+            elif msg_type == "set_price":
+                # 设置/更新服务价格（支持比价功能 TC004）
+                await self._handle_set_price(websocket, client_id, message)
+
+            elif msg_type == "listing_cancel_batch":
+                # 批量下架（TC011）
+                await self._handle_listing_cancel_batch(websocket, client_id, message)
+
+            elif msg_type == "transaction_create":
+                # 创建交易记录
+                await self._handle_transaction_create(websocket, client_id, message)
+
+            elif msg_type == "transaction_query":
+                # 查询交易记录（TC012）
+                await self._handle_transaction_query(websocket, client_id, message)
+
             else:
                 print(f"[Server] Unknown message type: {msg_type}")
 
@@ -326,10 +360,131 @@ class HubServer:
         except Exception as e:
             print(f"[Server] Error processing message: {e}")
 
+    async def _handle_help(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理帮助命令 (TC007)"""
+        request_id = message.get("request_id")
+        topic = message.get("topic", "general")  # 可选：指定帮助主题
+
+        help_content = {
+            "general": {
+                "title": "🎯 Claw Service Hub 帮助",
+                "description": "服务撮合云端 - 你的服务市场",
+                "commands": {
+                    "register": "注册新服务 - 发送 register 消息",
+                    "list": "获取服务列表 - 使用 skill_discover 或 GET /api/services",
+                    "call": "调用服务 - 使用 call_service 消息",
+                    "unregister": "注销服务 - 使用 DELETE /api/services/{id}",
+                    "help": "获取帮助 - 发送 help 消息",
+                },
+                "examples": [
+                    {
+                        "type": "skill_discover",
+                        "description": "发现所有服务",
+                        "message": {"type": "skill_discover", "query": ""}
+                    },
+                    {
+                        "type": "skill_discover",
+                        "description": "搜索服务（模糊匹配）",
+                        "message": {"type": "skill_discover", "query": "天气", "fuzzy": True}
+                    },
+                    {
+                        "type": "skill_discover",
+                        "description": "按价格排序",
+                        "message": {"type": "skill_discover", "sort_by": "price", "sort_order": "asc"}
+                    },
+                    {
+                        "type": "listing_create",
+                        "description": "创建服务挂牌",
+                        "message": {"type": "listing_create", "service_id": "xxx", "price": 100}
+                    },
+                    {
+                        "type": "negotiation_offer",
+                        "description": "提交议价",
+                        "message": {"type": "negotiation_offer", "listing_id": "xxx", "price": 80}
+                    },
+                ]
+            },
+            "register": {
+                "title": "📝 服务注册",
+                "description": "注册一个新的服务到市场",
+                "required_fields": ["service.name", "service.description"],
+                "optional_fields": ["service.version", "service.tags", "service.price", "service.price_unit", "skill_doc"],
+                "example": {
+                    "type": "register",
+                    "client_id": "client-xxx",
+                    "service": {
+                        "name": "天气查询服务",
+                        "description": "提供实时天气信息",
+                        "version": "1.0.0",
+                        "tags": ["天气", "API"],
+                        "price": 0.01,
+                        "price_unit": "次"
+                    }
+                }
+            },
+            "discover": {
+                "title": "🔍 服务发现",
+                "description": "查找和筛选服务",
+                "parameters": {
+                    "query": "搜索关键词（支持模糊匹配）",
+                    "tags": "标签过滤",
+                    "min_price": "最低价格",
+                    "max_price": "最高价格",
+                    "sort_by": "排序字段 (name/price/time)",
+                    "sort_order": "排序方向 (asc/desc)",
+                    "fuzzy": "是否启用模糊搜索"
+                },
+                "example": {
+                    "type": "skill_discover",
+                    "query": "天气",
+                    "fuzzy": True,
+                    "sort_by": "price",
+                    "sort_order": "asc"
+                }
+            },
+            "trade": {
+                "title": "💰 交易功能",
+                "description": "挂牌、出价、议价、交易",
+                "commands": {
+                    "listing_create": "创建服务挂牌",
+                    "listing_query": "查询挂牌列表",
+                    "bid_create": "创建出价",
+                    "bid_accept": "接受出价",
+                    "negotiation_offer": "发起议价",
+                    "negotiation_counter": "还价",
+                    "negotiation_accept": "接受议价",
+                    "transaction_create": "创建交易"
+                }
+            },
+            "rating": {
+                "title": "⭐ 评分系统",
+                "description": "为服务评分和评价",
+                "api": "POST /api/ratings",
+                "fields": {
+                    "service_id": "服务ID",
+                    "score": "评分 (0-5)",
+                    "comment": "评价内容",
+                    "tags": "标签"
+                }
+            }
+        }
+
+        # 获取对应主题的帮助内容
+        content = help_content.get(topic, help_content["general"])
+
+        await websocket.send(json.dumps({
+            "type": "help",
+            "request_id": request_id,
+            "topic": topic,
+            "content": content,
+            "server_version": __version__
+        }))
+
     async def _handle_register(self, websocket: ServerConnection, client_id: str, message: dict):
         """处理服务注册"""
         service_data = message.get("service", {})
         skill_doc = message.get("skill_doc")  # 获取 skill.md 内容
+        request_id = message.get("request_id")  # 获取请求ID
 
         service = ToolService(
             id=service_data.get("id", ""),
@@ -341,6 +496,9 @@ class HubServer:
             metadata=service_data.get("metadata", {}),
             emoji=service_data.get("emoji", "🔧"),
             requires=service_data.get("requires", {}),
+            price=service_data.get("price"),  # P0: 服务价格
+            price_unit=service_data.get("price_unit", "次"),
+            owner=service_data.get("owner"),  # P0: 服务所有者
             execution_mode=service_data.get("execution_mode", "local"),
             interface_spec=service_data.get("interface_spec", {}),
             allowed_users=service_data.get("allowed_users", []),  # 用户访问控制
@@ -372,6 +530,7 @@ class HubServer:
             json.dumps(
                 {
                     "type": "registered",
+                    "request_id": request_id,  # 返回请求ID
                     "service_id": service_id,
                     "tunnel_id": tunnel.id,
                     "channel_id": channel.channel_id,
@@ -381,13 +540,84 @@ class HubServer:
         )
 
         logger.info(
-            "service_registered",
+            f"Service registered: {service.name} (id={service_id}, tunnel={tunnel.id})"
+        )
+
+    async def _handle_set_price(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理设置/更新服务价格（支持比价功能 TC004）"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+        new_price = message.get("price")
+        price_unit = message.get("price_unit", "次")
+        
+        if not service_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_SERVICE_ID",
+                "message": "Missing service_id",
+                "details": "service_id is required",
+                "request_id": request_id
+            }))
+            return
+        
+        # Validate price
+        if new_price is None or not isinstance(new_price, (int, float)) or new_price < 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a non-negative number",
+                "request_id": request_id
+            }))
+            return
+        
+        # Get service from registry
+        service = self.registry.get(service_id)
+        if not service:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "SERVICE_NOT_FOUND",
+                "message": "Service not found",
+                "details": f"No service found with id: {service_id}",
+                "request_id": request_id
+            }))
+            return
+        
+        # Verify ownership (client must be the service provider)
+        if service.provider_client_id != client_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "NOT_SERVICE_OWNER",
+                "message": "Not authorized to update this service",
+                "details": "Only the service owner can update the price",
+                "request_id": request_id
+            }))
+            return
+        
+        # Update price
+        old_price = service.price
+        service.price = new_price
+        service.price_unit = price_unit
+        
+        # Update in registry
+        self.registry._services[service_id] = service
+        
+        await websocket.send(json.dumps({
+            "type": "price_updated",
+            "service_id": service_id,
+            "old_price": old_price,
+            "price": new_price,
+            "price_unit": price_unit,
+            "request_id": request_id
+        }))
+        
+        logger.info(
+            "service_price_updated",
             service_name=service.name,
             service_id=service_id,
-            tunnel_id=tunnel.id,
-            channel_id=channel.channel_id,
-            execution_mode=service.execution_mode,
-            client_type=client_type,
+            old_price=old_price,
+            new_price=new_price,
+            price_unit=price_unit,
         )
 
     async def _handle_connect(self, websocket: ServerConnection, client_id: str, message: dict):
@@ -407,16 +637,33 @@ class HubServer:
     async def _handle_skill_discover(
         self, websocket: ServerConnection, client_id: str, message: dict
     ):
-        """处理 skill 方式服务发现"""
+        """处理 skill 方式服务发现 - 支持模糊搜索、价格排序、用户过滤"""
         request_id = message.get("request_id")
         query = message.get("query", "")
         tags = message.get("tags", [])
         execution_mode = message.get("execution_mode")
         status = message.get("status", "online")
+        
+        # P0: 新增过滤参数
+        owner = message.get("owner")  # 用户服务过滤
+        min_price = message.get("min_price")
+        max_price = message.get("max_price")
+        sort_by = message.get("sort_by")  # name, price, time
+        sort_order = message.get("sort_order", "asc")
+        fuzzy = message.get("fuzzy", True)  # 模糊搜索开关
 
         # 查找服务
         services = self.registry.find(
-            name=query, tags=tags if tags else None, status=status, execution_mode=execution_mode
+            name=query, 
+            tags=tags if tags else None, 
+            status=status, 
+            execution_mode=execution_mode,
+            owner=owner,  # P0: 用户服务过滤
+            min_price=min_price,  # P0: 价格范围
+            max_price=max_price,
+            sort_by=sort_by,  # P0: 排序
+            sort_order=sort_order,
+            fuzzy=fuzzy,  # P0: 模糊搜索
         )
 
         # 转换为 skill 描述符
@@ -461,7 +708,7 @@ class HubServer:
             response = {
                 "type": "error",
                 "request_id": request_id,
-                "message": f"Service not found: {service_id}",
+                "message": "未找到指定的服务", "details": f"服务ID: {service_id}",
             }
 
         await websocket.send(json.dumps(response))
@@ -507,7 +754,7 @@ class HubServer:
                     {
                         "type": "error",
                         "request_id": request_id,
-                        "message": f"Service not found: {service_id}",
+                        "message": "未找到指定的服务", "details": f"服务ID: {service_id}",
                     }
                 )
             )
@@ -520,7 +767,7 @@ class HubServer:
                     {
                         "type": "error",
                         "request_id": request_id,
-                        "message": f"Service is offline: {service_id}",
+                        "message": "服务当前不在线", "details": f"服务ID: {service_id}",
                     }
                 )
             )
@@ -627,7 +874,7 @@ class HubServer:
                         {
                             "type": "error",
                             "request_id": channel_req["request_id"],
-                            "message": "Channel request rejected by service provider",
+                            "message": "服务提供者拒绝了通道请求",
                         }
                     )
                 )
@@ -788,10 +1035,61 @@ class HubServer:
         )
 
     async def _handle_api_services(self, request):
-        """GET /api/services - 列出所有服务"""
+        """GET /api/services - 列出所有服务 (支持查询参数过滤)
+        
+        Query params:
+            - q: 搜索关键词 (模糊搜索)
+            - tags: 逗号分隔的标签
+            - status: 服务状态
+            - execution_mode: 执行模式
+            - owner: 服务所有者用户ID
+            - min_price: 最低价格
+            - max_price: 最高价格
+            - sort_by: 排序字段 (name, price, time)
+            - sort_order: 排序方向 (asc, desc)
+            - fuzzy: 是否模糊搜索 (true/false)
+        """
         from aiohttp import web
 
-        services = self.registry.list_all()
+        # 解析查询参数
+        query = request.query.get("q", "")
+        tags_str = request.query.get("tags", "")
+        tags = tags_str.split(",") if tags_str else None
+        status = request.query.get("status")
+        execution_mode = request.query.get("execution_mode")
+        owner = request.query.get("owner")  # P0: 用户服务过滤
+        min_price = request.query.get("min_price")
+        max_price = request.query.get("max_price")
+        sort_by = request.query.get("sort_by")
+        sort_order = request.query.get("sort_order", "asc")
+        fuzzy = request.query.get("fuzzy", "true").lower() == "true"
+        
+        # 转换价格参数
+        if min_price is not None:
+            try:
+                min_price = float(min_price)
+            except ValueError:
+                min_price = None
+        if max_price is not None:
+            try:
+                max_price = float(max_price)
+            except ValueError:
+                max_price = None
+
+        # 查找服务
+        services = self.registry.find(
+            name=query if query else None,
+            tags=tags,
+            status=status,
+            execution_mode=execution_mode,
+            owner=owner,  # P0: 用户服务过滤
+            min_price=min_price,  # P0: 价格范围
+            max_price=max_price,
+            sort_by=sort_by,  # P0: 排序
+            sort_order=sort_order,
+            fuzzy=fuzzy,  # P0: 模糊搜索
+        )
+        
         return web.json_response([s.to_metadata_dict() for s in services])
 
     async def _handle_api_service_detail(self, request):
@@ -802,7 +1100,7 @@ class HubServer:
         service = self.registry.get(service_id)
         if service:
             return web.json_response(service.to_dict())
-        return web.json_response({"error": "Service not found"}, status=404)
+        return web.json_response({"error": "未找到指定的服务"}, status=404)
 
     async def _handle_api_skill_doc(self, request):
         """GET /api/services/{service_id}/skill.md - 获取技能文档"""
@@ -813,6 +1111,66 @@ class HubServer:
         if skill_doc:
             return web.Response(text=skill_doc, content_type="text/markdown")
         return web.json_response({"error": "Skill doc not found"}, status=404)
+
+    async def _handle_rate(self, websocket, client_id: str, message: dict):
+        """处理服务评分 (WebSocket)"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+        score = message.get("score")
+        comment = message.get("comment", "")
+        user_id = message.get("user_id", client_id)
+
+        if not service_id or score is None:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "request_id": request_id,
+                "error_code": "MISSING_PARAMS",
+                "message": "缺少 service_id 或 score"
+            }))
+            return
+
+        try:
+            rating = await self.rating_mgr.add_rating(
+                service_id=service_id,
+                score=score,
+                comment=comment,
+                tags=[],
+            )
+            await websocket.send(json.dumps({
+                "type": "rating_result",
+                "request_id": request_id,
+                "success": True,
+                "rating": rating.to_dict()
+            }))
+        except Exception as e:
+            await websocket.send(json.dumps({
+                "type": "rating_result",
+                "request_id": request_id,
+                "success": False,
+                "error": str(e)
+            }))
+
+    async def _handle_get_rating(self, websocket, client_id: str, message: dict):
+        """获取服务评分 (WebSocket)"""
+        request_id = message.get("request_id")
+        service_id = message.get("service_id")
+
+        if not service_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "request_id": request_id,
+                "error_code": "MISSING_SERVICE_ID",
+                "message": "缺少 service_id"
+            }))
+            return
+
+        stats = self.rating_mgr.get_stats(service_id)
+        await websocket.send(json.dumps({
+            "type": "rating_stats",
+            "request_id": request_id,
+            "success": True,
+            "stats": stats
+        }))
 
     async def _handle_api_tunnels(self, request):
         """GET /api/tunnels - 列出所有隧道"""
@@ -1080,6 +1438,7 @@ class HubServer:
     async def _handle_user_register(self, websocket: ServerConnection, client_id: str, message: dict):
         """处理用户注册"""
         name = message.get("name")
+        request_id = message.get("request_id")  # 获取请求ID
         user = self.user_mgr.create_user(name=name)
 
         print(f"[Server] 用户注册: {user.user_id} (name={user.name})")
@@ -1088,6 +1447,7 @@ class HubServer:
             json.dumps(
                 {
                     "type": "user_register_response",
+                    "request_id": request_id,  # 返回请求ID
                     "success": True,
                     "user": user.to_dict(),
                 }
@@ -1097,6 +1457,7 @@ class HubServer:
     async def _handle_user_auth(self, websocket: ServerConnection, client_id: str, message: dict):
         """处理用户认证（API Key 验证）"""
         api_key = message.get("api_key")
+        request_id = message.get("request_id")  # 获取请求ID
         result = self.user_mgr.verify_api_key(api_key)
 
         if result["valid"]:
@@ -1110,6 +1471,7 @@ class HubServer:
                 json.dumps(
                     {
                         "type": "user_auth_response",
+                        "request_id": request_id,  # 返回请求ID
                         "success": True,
                         "user": result["user"].to_metadata_dict(),
                     }
@@ -1122,6 +1484,7 @@ class HubServer:
                 json.dumps(
                     {
                         "type": "user_auth_response",
+                        "request_id": request_id,  # 返回请求ID
                         "success": False,
                         "reason": result["reason"],
                     }
@@ -1544,8 +1907,24 @@ class HubServer:
             
         bid["status"] = "accepted"
         listing_id = bid["listing_id"]
-        if listing_id in self._listings:
-            self._listings[listing_id]["status"] = "sold"
+        listing = self._listings.get(listing_id)
+        if listing:
+            listing["status"] = "sold"
+            # 创建交易记录
+            transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+            transaction = {
+                "transaction_id": transaction_id,
+                "listing_id": listing_id,
+                "buyer_id": bid.get("agent_id"),
+                "seller_id": listing.get("agent_id"),
+                "price": bid.get("price"),
+                "type": "bid",
+                "status": "completed",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._transactions[transaction_id] = transaction
+            print(f"[Server] Transaction created from bid: {transaction_id}")
+        
         # 通知出价者
         bidder_ws = self._client_websockets.get(bid.get("agent_id"))
         if bidder_ws:
@@ -1736,8 +2115,24 @@ class HubServer:
             
         offer["status"] = "accepted"
         listing_id = offer["listing_id"]
-        if listing_id in self._listings:
-            self._listings[listing_id]["status"] = "sold"
+        listing = self._listings.get(listing_id)
+        if listing:
+            listing["status"] = "sold"
+            # 创建交易记录
+            transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+            transaction = {
+                "transaction_id": transaction_id,
+                "listing_id": listing_id,
+                "buyer_id": offer.get("agent_id"),
+                "seller_id": listing.get("agent_id"),
+                "price": offer.get("price"),
+                "type": "negotiation",
+                "status": "completed",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._transactions[transaction_id] = transaction
+            print(f"[Server] Transaction created from negotiation: {transaction_id}")
+        
         # 通知出价者
         offer_agent = offer.get("agent_id")
         offer_ws = self._client_websockets.get(offer_agent)
@@ -1745,6 +2140,289 @@ class HubServer:
             await offer_ws.send(json.dumps({"type": "negotiation_accepted", "offer_id": offer_id}))
         await websocket.send(json.dumps({"type": "negotiation_accept_response", "offer_id": offer_id, "status": "accepted", "request_id": request_id}))
         print(f"[Server] Negotiation accepted: {offer_id}")
+
+    # ========== 交易功能增强 ==========
+    
+    async def _handle_listing_cancel(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理取消挂牌（TC009 取消订单）"""
+        request_id = message.get("request_id")
+        listing_id = message.get("listing_id")
+        
+        if not listing_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_LISTING_ID",
+                "message": "Missing listing_id",
+                "details": "listing_id is required",
+                "request_id": request_id
+            }))
+            return
+            
+        listing = self._listings.get(listing_id)
+        if not listing:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_FOUND",
+                "message": f"Listing not found: {listing_id}",
+                "details": "The listing does not exist or has been removed",
+                "request_id": request_id
+            }))
+            return
+        
+        # 验证权限（只有挂牌所有者可以取消）
+        if listing.get("agent_id") != client_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "PERMISSION_DENIED",
+                "message": "Permission denied",
+                "details": "Only the listing owner can cancel this listing",
+                "request_id": request_id
+            }))
+            return
+        
+        # 检查挂牌状态
+        if listing.get("status") == "sold":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_ALREADY_SOLD",
+                "message": "Listing already sold",
+                "details": "Cannot cancel a listing that has been sold",
+                "request_id": request_id
+            }))
+            return
+        
+        # 取消挂牌
+        listing["status"] = "cancelled"
+        listing["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+        
+        await websocket.send(json.dumps({
+            "type": "listing_cancelled",
+            "listing_id": listing_id,
+            "status": "cancelled",
+            "request_id": request_id
+        }))
+        print(f"[Server] Listing cancelled: {listing_id}")
+
+    async def _handle_listing_update_price(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理修改挂牌价格（TC010 修改价格）"""
+        request_id = message.get("request_id")
+        listing_id = message.get("listing_id")
+        new_price = message.get("price")
+        
+        if not listing_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_LISTING_ID",
+                "message": "Missing listing_id",
+                "details": "listing_id is required",
+                "request_id": request_id
+            }))
+            return
+        
+        if new_price is None or not isinstance(new_price, (int, float)) or new_price <= 0:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "INVALID_PRICE",
+                "message": "Invalid price value",
+                "details": "Price must be a positive number",
+                "request_id": request_id
+            }))
+            return
+            
+        listing = self._listings.get(listing_id)
+        if not listing:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_FOUND",
+                "message": f"Listing not found: {listing_id}",
+                "details": "The listing does not exist or has been removed",
+                "request_id": request_id
+            }))
+            return
+        
+        # 验证权限
+        if listing.get("agent_id") != client_id:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "PERMISSION_DENIED",
+                "message": "Permission denied",
+                "details": "Only the listing owner can update the price",
+                "request_id": request_id
+            }))
+            return
+        
+        # 检查挂牌状态
+        if listing.get("status") != "active":
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "LISTING_NOT_ACTIVE",
+                "message": f"Listing is not active: {listing.get('status')}",
+                "details": "Cannot update price of inactive listing",
+                "request_id": request_id
+            }))
+            return
+        
+        old_price = listing.get("price")
+        listing["price"] = new_price
+        listing["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        await websocket.send(json.dumps({
+            "type": "listing_price_updated",
+            "listing_id": listing_id,
+            "old_price": old_price,
+            "new_price": new_price,
+            "status": "active",
+            "request_id": request_id
+        }))
+        print(f"[Server] Listing price updated: {listing_id} ({old_price} -> {new_price})")
+
+    async def _handle_listing_cancel_batch(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理批量下架（TC011 批量下架）"""
+        request_id = message.get("request_id")
+        listing_ids = message.get("listing_ids", [])
+        
+        if not listing_ids:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_LISTING_IDS",
+                "message": "Missing listing_ids",
+                "details": "listing_ids is required and must not be empty",
+                "request_id": request_id
+            }))
+            return
+        
+        results = []
+        for listing_id in listing_ids:
+            listing = self._listings.get(listing_id)
+            if not listing:
+                results.append({
+                    "listing_id": listing_id,
+                    "status": "error",
+                    "reason": "Listing not found"
+                })
+                continue
+            
+            # 验证权限
+            if listing.get("agent_id") != client_id:
+                results.append({
+                    "listing_id": listing_id,
+                    "status": "error",
+                    "reason": "Permission denied"
+                })
+                continue
+            
+            # 检查状态
+            if listing.get("status") == "sold":
+                results.append({
+                    "listing_id": listing_id,
+                    "status": "error",
+                    "reason": "Listing already sold"
+                })
+                continue
+            
+            # 取消挂牌
+            listing["status"] = "cancelled"
+            listing["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+            results.append({
+                "listing_id": listing_id,
+                "status": "cancelled"
+            })
+        
+        success_count = sum(1 for r in results if r["status"] == "cancelled")
+        await websocket.send(json.dumps({
+            "type": "listing_cancelled_batch",
+            "results": results,
+            "total": len(listing_ids),
+            "success_count": success_count,
+            "request_id": request_id
+        }))
+        print(f"[Server] Batch cancel: {success_count}/{len(listing_ids)} listings cancelled")
+
+    # 交易记录存储: transaction_id -> transaction
+    _transactions: Dict[str, dict] = {}
+    
+    async def _handle_transaction_create(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理创建交易记录（购买成交时记录）"""
+        transaction_id = message.get("transaction_id")
+        listing_id = message.get("listing_id")
+        buyer_id = message.get("buyer_id")
+        seller_id = message.get("seller_id")
+        price = message.get("price")
+        
+        if not all([transaction_id, listing_id, buyer_id, seller_id, price]):
+            await websocket.send(json.dumps({
+                "type": "error",
+                "error_code": "MISSING_FIELDS",
+                "message": "Missing required fields",
+                "details": "transaction_id, listing_id, buyer_id, seller_id, and price are required"
+            }))
+            return
+        
+        transaction = {
+            "transaction_id": transaction_id,
+            "listing_id": listing_id,
+            "buyer_id": buyer_id,
+            "seller_id": seller_id,
+            "price": price,
+            "status": "completed",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._transactions[transaction_id] = transaction
+        
+        # 同时记录到 buyer 和 seller 的消费/收入记录
+        # (在用户对象中记录，这里先简化为存储在 _transactions 中)
+        
+        await websocket.send(json.dumps({
+            "type": "transaction_created",
+            "transaction_id": transaction_id,
+            "status": "completed"
+        }))
+        print(f"[Server] Transaction created: {transaction_id}")
+
+    async def _handle_transaction_query(self, websocket: ServerConnection, client_id: str, message: dict):
+        """处理查询交易记录（TC012 查询消费记录）"""
+        request_id = message.get("request_id")
+        query_type = message.get("query_type", "all")  # all, bought, sold
+        agent_id = message.get("agent_id")  # 可选：查询特定用户的记录
+        
+        transactions = []
+        
+        for txn in self._transactions.values():
+            if query_type == "bought":
+                # 查询购买的（消费记录）
+                if agent_id and txn.get("buyer_id") == agent_id:
+                    transactions.append(txn)
+                elif not agent_id and txn.get("buyer_id") == client_id:
+                    transactions.append(txn)
+            elif query_type == "sold":
+                # 查询销售的（收入记录）
+                if agent_id and txn.get("seller_id") == agent_id:
+                    transactions.append(txn)
+                elif not agent_id and txn.get("seller_id") == client_id:
+                    transactions.append(txn)
+            else:
+                # 全部记录
+                if agent_id:
+                    if txn.get("buyer_id") == agent_id or txn.get("seller_id") == agent_id:
+                        transactions.append(txn)
+                else:
+                    if txn.get("buyer_id") == client_id or txn.get("seller_id") == client_id:
+                        transactions.append(txn)
+        
+        # 计算总消费/收入
+        total_spent = sum(t.get("price", 0) for t in transactions if t.get("buyer_id") == (agent_id or client_id))
+        total_earned = sum(t.get("price", 0) for t in transactions if t.get("seller_id") == (agent_id or client_id))
+        
+        await websocket.send(json.dumps({
+            "type": "transaction_query_response",
+            "request_id": request_id,
+            "transactions": transactions,
+            "total": len(transactions),
+            "total_spent": total_spent,
+            "total_earned": total_earned,
+            "query_type": query_type
+        }))
+        print(f"[Server] Transaction query: {len(transactions)} records for {agent_id or client_id}")
 
 
 def main():

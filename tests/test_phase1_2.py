@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.registry import ServiceRegistry, ToolService
+from server.core.registry import ServiceRegistry, ToolService
 
 
 def test_tool_service_metadata():

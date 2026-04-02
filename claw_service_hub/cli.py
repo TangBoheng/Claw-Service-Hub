@@ -121,23 +121,38 @@ def start(host: str, port: int, http_port: int):
 @click.option("--description", "-d", default="", help="Service description")
 @click.option("--version", "-v", default="1.0.0", help="Service version")
 @click.option("--tags", "-t", multiple=True, help="Service tags")
+@click.option("--url", "-u", default="", help="Service endpoint URL")
+@click.option("--price", "-p", type=float, default=None, help="Service price")
+@click.option("--price-unit", default="次", help="Price unit (e.g., 次, 月, 年)")
 @click.option("--host", default=DEFAULT_HOST, help="Server host")
-def register(name: str, description: str, version: str, tags: tuple, host: str):
+def register(name: str, description: str, version: str, tags: tuple, url: str, price: float, price_unit: str, host: str):
     """Register a new service"""
     click.echo(f"Registering service: {name}")
     
     client_id = f"cli-{uuid.uuid4().hex[:8]}"
     
+    # Build service data
+    service_data = {
+        "name": name,
+        "description": description,
+        "version": version,
+        "tags": list(tags),
+    }
+    
+    # Add endpoint URL if provided
+    if url:
+        service_data["endpoint"] = url
+    
+    # Add price if provided
+    if price is not None:
+        service_data["price"] = price
+        service_data["price_unit"] = price_unit
+    
     # First, send register message
     register_msg = {
         "type": "register",
         "client_id": client_id,
-        "service": {
-            "name": name,
-            "description": description,
-            "version": version,
-            "tags": list(tags),
-        },
+        "service": service_data,
         "skill_doc": ""  # Optional skill doc
     }
     

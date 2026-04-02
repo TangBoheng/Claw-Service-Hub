@@ -27,6 +27,10 @@ class ToolService:
     emoji: str = "🔧"
     requires: dict = None  # {"bins": [...], "env": [...]}
 
+    # 价格属性 (P0)
+    price: Optional[float] = None  # 服务价格 (如 0.00 表示免费)
+    price_unit: str = "次"  # 价格单位 (如 "次", "月", "年")
+
     # 状态
     status: str = "online"  # online, offline
     registered_at: str = ""
@@ -38,6 +42,7 @@ class ToolService:
     # 新增：服务与执行器分离支持
     execution_mode: str = "local"  # "local" | "remote" | "external"
     provider_client_id: Optional[str] = None  # 注册此服务的管理客户端ID
+    owner: Optional[str] = None  # 服务所有者用户ID (P0: 用户服务过滤)
     executor_endpoint: Optional[str] = None  # 外部执行器地址（如n8n webhook）
     interface_spec: dict = None  # 接口规范 {"methods": [...], "schema": {...}}
 
@@ -75,6 +80,9 @@ class ToolService:
             "tunnel_id": self.tunnel_id,
             "execution_mode": self.execution_mode,
             "provider_client_id": self.provider_client_id,
+            "owner": self.owner,  # 服务所有者
+            "price": self.price,  # 服务价格
+            "price_unit": self.price_unit,  # 价格单位
             "allowed_users": self.allowed_users,  # 添加 allowed_users 到 metadata
         }
 
@@ -93,6 +101,9 @@ class ToolService:
             "execution_mode": self.execution_mode,
             "interface_spec": self.interface_spec,
             "status": self.status,
+            "owner": self.owner,  # 服务所有者
+            "price": self.price,  # 服务价格
+            "price_unit": self.price_unit,  # 价格单位
             "allowed_users": self.allowed_users,  # 添加 allowed_users
         }
 
@@ -201,26 +212,82 @@ class ServiceRegistry:
         tags: List[str] = None,
         status: str = None,
         execution_mode: str = None,
+        owner: str = None,  # P0: 用户服务过滤
+        min_price: float = None,  # P0: 价格范围
+        max_price: float = None,
+        sort_by: str = None,  # P0: 排序 (name, price, time)
+        sort_order: str = "asc",  # asc or desc
+        fuzzy: bool = True,  # P0: 模糊搜索开关
     ) -> List[ToolService]:
         """
         查找服务 - 类似 skill 的快速发现
-        支持按名称、标签、状态、执行模式过滤
+        支持按名称、标签、状态、执行模式、价格范围过滤和排序
+        
+        Args:
+            name: 服务名称 (支持模糊搜索)
+            tags: 标签列表 (任一匹配)
+            status: 服务状态
+            execution_mode: 执行模式
+            owner: 服务所有者用户ID (P0: 用户服务过滤)
+            min_price: 最低价格
+            max_price: 最高价格
+            sort_by: 排序字段 (name, price, time)
+            sort_order: 排序方向 (asc, desc)
+            fuzzy: 是否启用模糊搜索 (默认开启)
         """
-        results = self._services.values()
+        results = list(self._services.values())
 
+        # 名称过滤 - 支持模糊搜索
         if name:
-            results = [s for s in results if name.lower() in s.name.lower()]
+            if fuzzy:
+                # 模糊搜索: 检查名称是否包含搜索词 (不区分大小写)
+                name_lower = name.lower()
+                results = [s for s in results if name_lower in s.name.lower()]
+            else:
+                # 精确匹配
+                results = [s for s in results if name.lower() == s.name.lower()]
 
+        # 标签过滤 - 任一标签匹配即可
         if tags:
             results = [s for s in results if any(t in s.tags for t in tags)]
 
+        # 状态过滤
         if status:
             results = [s for s in results if s.status == status]
 
+        # 执行模式过滤
         if execution_mode:
             results = [s for s in results if s.execution_mode == execution_mode]
 
-        return list(results)
+        # P0: 所有者过滤
+        if owner:
+            results = [s for s in results if s.owner == owner]
+
+        # P0: 价格范围过滤
+        if min_price is not None:
+            results = [s for s in results if s.price is not None and s.price >= min_price]
+        
+        if max_price is not None:
+            results = [s for s in results if s.price is not None and s.price <= max_price]
+
+        # P0: 排序
+        if sort_by:
+            reverse = sort_order.lower() == "desc"
+            if sort_by == "price":
+                # 按价格排序 (None 价格排最后)
+                results = sorted(
+                    results, 
+                    key=lambda s: s.price if s.price is not None else float('inf'),
+                    reverse=reverse
+                )
+            elif sort_by == "name":
+                # 按名称排序
+                results = sorted(results, key=lambda s: s.name.lower(), reverse=reverse)
+            elif sort_by == "time":
+                # 按注册时间排序
+                results = sorted(results, key=lambda s: s.registered_at, reverse=reverse)
+
+        return results
 
     async def cleanup_stale(self):
         """清理超时离线服务"""
@@ -231,8 +298,11 @@ class ServiceRegistry:
             last_hb = datetime.fromisoformat(service.last_heartbeat)
             if last_hb.tzinfo is None:
                 last_hb = last_hb.replace(tzinfo=timezone.utc)
-            if (now - last_hb).total_seconds() > self._heartbeat_ttl:
+            elapsed = (now - last_hb).total_seconds()
+            if elapsed > self._heartbeat_ttl:
                 stale_ids.append(sid)
+                # Debug: 打印心跳超时详情
+                print(f"[Registry] DEBUG: {service.name} heartbeat elapsed: {elapsed:.1f}s > {self._heartbeat_ttl}s", flush=True)
 
         for sid in stale_ids:
             service = self._services.pop(sid, None)

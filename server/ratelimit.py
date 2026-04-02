@@ -1,12 +1,24 @@
 """
 Simple rate limiting for Claw Service Hub.
 Uses in-memory token bucket algorithm.
+
+P2 错误提示优化: 所有限流相关错误信息改为中文友好提示
 """
 
 import asyncio
 import time
 from collections import defaultdict
 from typing import Dict, Optional
+
+
+# P2: 中文友好的错误消息
+RATE_LIMIT_ERROR_MESSAGES = {
+    "exceeded": "请求过于频繁，请稍后再试",
+    "retry_after": "请等待 {seconds} 秒后重试",
+    "no_limiter": "未配置对应的限流器",
+    "limit_info": "您当前剩余 {remaining} 次请求机会，最多 {limit} 次/分钟",
+    "bucket_exhausted": "当前时段请求配额已用尽",
+}
 
 
 class RateLimiter:
@@ -58,14 +70,23 @@ class RateLimiter:
                 "remaining": int(bucket["tokens"]),
                 "reset_at": bucket["last_update"]
                 + (self.burst_size - bucket["tokens"]) / self.rate,
+                # P2: 添加友好的中文提示
+                "message": RATE_LIMIT_ERROR_MESSAGES["limit_info"].format(
+                    remaining=int(bucket["tokens"]),
+                    limit=self.burst_size
+                ),
             }
         else:
+            retry_after = int((self.burst_size - bucket["tokens"]) / self.rate)
             return False, {
                 "allowed": False,
                 "remaining": 0,
                 "reset_at": bucket["last_update"]
                 + (self.burst_size - bucket["tokens"]) / self.rate,
-                "retry_after": int((self.burst_size - bucket["tokens"]) / self.rate),
+                "retry_after": retry_after,
+                # P2: 添加友好的中文提示
+                "message": RATE_LIMIT_ERROR_MESSAGES["exceeded"],
+                "hint": RATE_LIMIT_ERROR_MESSAGES["retry_after"].format(seconds=retry_after),
             }
 
     async def cleanup_inactive(self, max_age_seconds: int = 3600) -> int:
@@ -97,13 +118,25 @@ class RateLimiter:
         """Get current rate limit status for a client."""
         bucket = self.buckets.get(client_id)
         if not bucket:
-            return {"allowed": True, "remaining": self.burst_size, "limit": self.burst_size}
+            return {
+                "allowed": True, 
+                "remaining": self.burst_size, 
+                "limit": self.burst_size,
+                "message": RATE_LIMIT_ERROR_MESSAGES["limit_info"].format(
+                    remaining=self.burst_size,
+                    limit=self.burst_size
+                ),
+            }
 
         self._refill_bucket(bucket)
         return {
             "allowed": bucket["tokens"] >= 1,
             "remaining": int(bucket["tokens"]),
             "limit": self.burst_size,
+            "message": RATE_LIMIT_ERROR_MESSAGES["limit_info"].format(
+                remaining=int(bucket["tokens"]),
+                limit=self.burst_size
+            ),
         }
 
 

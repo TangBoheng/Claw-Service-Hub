@@ -10,11 +10,16 @@ Trade 模块为 Claw-Service-Hub 提供挂牌、竞价、议价功能。
 |------|------|------|
 | `listing_create` | 创建挂牌 | Client → Server |
 | `listing_query` | 查询挂牌 | Client → Server |
+| `listing_cancel` | 取消挂牌/订单（TC009） | Client → Server |
+| `listing_update_price` | 修改挂牌价格（TC010） | Client → Server |
+| `listing_cancel_batch` | 批量下架（TC011） | Client → Server |
 | `bid_create` | 创建出价 | Client → Server |
 | `bid_accept` | 接受出价 | Client → Server |
 | `negotiation_offer` | 议价出价 | Client → Server |
 | `negotiation_counter` | 议价还价 | Client → Server |
 | `negotiation_accept` | 接受议价 | Client → Server |
+| `transaction_create` | 创建交易记录 | Client → Server |
+| `transaction_query` | 查询交易/消费记录（TC012） | Client → Server |
 
 ## 错误代码
 
