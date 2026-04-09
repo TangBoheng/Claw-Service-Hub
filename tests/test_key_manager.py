@@ -10,7 +10,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.key_manager import KeyManager
+from server.auth.key_manager import KeyManager
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def test_key_expiration(key_manager):
     # Should be expired
     result = key_manager.verify_key(key, "test-service")
     assert result["valid"] is False
-    assert result["reason"] == "Key已过期"
+    assert result["reason"] == "Key 已过期"
 
 
 def test_key_call_limit(key_manager):
@@ -106,7 +106,7 @@ def test_key_revocation(key_manager):
     # Should be invalid after revocation
     result = key_manager.verify_key(key, "test-service")
     assert result["valid"] is False
-    assert result["reason"] == "Key已禁用"
+    assert result["reason"] == "Key 已禁用"
 
 
 def test_list_keys(key_manager):

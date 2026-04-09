@@ -22,27 +22,35 @@ from websockets.asyncio.server import ServerConnection
 # 导入版本号
 from server import __version__
 # 配置日志
-from server.logging_config import configure_logging, logger
+from server.utils.logging_config import configure_logging, logger
 
 if __name__ == "__main__":
     # 当直接运行 server/main.py 时，添加父目录到 path
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from server.key_manager import KeyManager, key_manager
+    from server.auth.key_manager import KeyManager, key_manager
     from server.rating import RatingManager, get_rating_manager
     from server.core.registry import ServiceRegistry, ToolService, get_registry
     from server.core.tunnel import TunnelManager, get_tunnel_manager
-    from server.user_manager import UserManager, user_manager
-    from server.chat_channel import ChatChannelManager, get_channel_manager
+    from server.auth.user_manager import UserManager, user_manager
+    from server.chat.channel import ChatChannelManager, get_channel_manager
+    from server.trade.listing import ListingManager, get_listing_manager
+    from server.trade.bid import BidManager, get_bid_manager
+    from server.trade.negotiation import NegotiationManager, get_negotiation_manager
+    from server.trade.transaction import TransactionManager, get_transaction_manager
 except ImportError:
     # 备用: 直接导入 (当 PYTHONPATH 正确设置时)
-    from key_manager import KeyManager, key_manager
+    from auth.key_manager import KeyManager, key_manager
     from rating import RatingManager, get_rating_manager
-    from registry import ServiceRegistry, ToolService, get_registry
-    from tunnel import TunnelManager, get_tunnel_manager
-    from user_manager import UserManager, user_manager
-    from chat_channel import ChatChannelManager, get_channel_manager
+    from core.registry import ServiceRegistry, ToolService, get_registry
+    from core.tunnel import TunnelManager, get_tunnel_manager
+    from auth.user_manager import UserManager, user_manager
+    from chat.channel import ChatChannelManager, get_channel_manager
+    from trade.listing import ListingManager, get_listing_manager
+    from trade.bid import BidManager, get_bid_manager
+    from trade.negotiation import NegotiationManager, get_negotiation_manager
+    from trade.transaction import TransactionManager, get_transaction_manager
 
 
 # 新增：导入管理客户端和通道管理
@@ -71,6 +79,13 @@ class HubServer:
         self.rating_mgr = get_rating_manager()
         self.user_mgr = user_manager  # 用户管理器
         self.chat_channel_mgr = get_channel_manager()  # Chat 频道管理器
+
+        # Trade 管理器
+        self.listing_mgr = get_listing_manager()
+        self.bid_mgr = get_bid_manager()
+        self.negotiation_mgr = get_negotiation_manager()
+        self.transaction_mgr = get_transaction_manager()
+
         self.clients: Set[ServerConnection] = set()
         self.running = False
 
@@ -79,18 +94,11 @@ class HubServer:
         self._key_request_map: Dict[str, str] = {}  # forward_request_id -> original_request_id
         self._client_info: Dict[str, dict] = {}  # client_id -> {type, service_id}
         self._pending_channels: Dict[str, dict] = {}  # request_id -> channel_request
-        # 用户会话: client_id -> user_id (用于追踪连接的用户身份)
+        # 用户会话：client_id -> user_id (用于追踪连接的用户身份)
         self._client_user_map: Dict[str, str] = {}
-        # Chat 消息队列: message_id -> message data
+        # Chat 消息队列：message_id -> message data
         self._chat_messages: Dict[str, dict] = {}
-        # Trade 挂牌存储: listing_id -> listing
-        self._listings: Dict[str, dict] = {}
-        # Trade 出价存储: bid_id -> bid
-        self._bids: Dict[str, dict] = {}
-        # Trade 议价存储: offer_id -> offer
-        self._offers: Dict[str, dict] = {}
-        # Trade 交易记录存储: transaction_id -> transaction
-        self._transactions: Dict[str, dict] = {}
+
         self.tunnel_mgr.on("request", self._on_tunnel_request)
 
     async def start(self):
@@ -571,7 +579,7 @@ class HubServer:
             }))
             return
         
-        # Get service from registry
+        # Get service from core.registry
         service = self.registry.get(service_id)
         if not service:
             await websocket.send(json.dumps({
@@ -1789,7 +1797,7 @@ class HubServer:
             "status": "active",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._listings[listing_id] = listing
+        self.listing_mgr._listings[listing_id] = listing
         await websocket.send(json.dumps({
             "type": "listing_created",
             "listing_id": listing_id,
@@ -1801,7 +1809,7 @@ class HubServer:
         """处理查询挂牌"""
         request_id = message.get("request_id")
         category = message.get("category")
-        listings = [l for l in self._listings.values() if l.get("status") == "active"]
+        listings = [l for l in self.listing_mgr._listings.values() if l.get("status") == "active"]
         if category:
             listings = [l for l in listings if l.get("category") == category]
         await websocket.send(json.dumps({
@@ -1828,7 +1836,7 @@ class HubServer:
             
         bid_id = message.get("bid_id")
         listing_id = message.get("listing_id")
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         
         if not listing:
             await websocket.send(json.dumps({
@@ -1866,7 +1874,7 @@ class HubServer:
             "status": "pending",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._bids[bid_id] = bid
+        self.bid_mgr._bids[bid_id] = bid
         # 通知挂牌所有者
         owner_ws = self._client_websockets.get(listing.get("agent_id"))
         if owner_ws:
@@ -1886,7 +1894,7 @@ class HubServer:
             }))
             return
             
-        bid = self._bids.get(bid_id)
+        bid = self.bid_mgr._bids.get(bid_id)
         if not bid:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -1907,7 +1915,7 @@ class HubServer:
             
         bid["status"] = "accepted"
         listing_id = bid["listing_id"]
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         if listing:
             listing["status"] = "sold"
             # 创建交易记录
@@ -1922,7 +1930,7 @@ class HubServer:
                 "status": "completed",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            self._transactions[transaction_id] = transaction
+            self.transaction_mgr._transactions[transaction_id] = transaction
             print(f"[Server] Transaction created from bid: {transaction_id}")
         
         # 通知出价者
@@ -1949,7 +1957,7 @@ class HubServer:
             }))
             return
             
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         if not listing:
             await websocket.send(json.dumps({
                 "type": "error", 
@@ -1992,7 +2000,7 @@ class HubServer:
             "status": "pending",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._offers[offer_id] = offer
+        self.negotiation_mgr._offers[offer_id] = offer
         # 通知挂牌所有者
         owner_ws = self._client_websockets.get(listing.get("agent_id"))
         if owner_ws:
@@ -2004,7 +2012,7 @@ class HubServer:
         """处理议价还价"""
         request_id = message.get("request_id")
         offer_id = message.get("offer_id")  # 这是客户端传来的原始 offer_id
-        original_offer = self._offers.get(offer_id)
+        original_offer = self.negotiation_mgr._offers.get(offer_id)
         if not original_offer:
             await websocket.send(json.dumps({
                 "type": "error", 
@@ -2029,7 +2037,7 @@ class HubServer:
         
         # 验证 listing_id
         listing_id = message.get("listing_id")
-        if not listing_id or listing_id not in self._listings:
+        if not listing_id or listing_id not in self.listing_mgr._listings:
             await websocket.send(json.dumps({
                 "type": "error",
                 "error_code": "LISTING_NOT_FOUND",
@@ -2055,10 +2063,10 @@ class HubServer:
         }
         
         # 如果已存在相同 ID 的 offer，先删除旧的
-        if counter_id in self._offers:
-            del self._offers[counter_id]
+        if counter_id in self.negotiation_mgr._offers:
+            del self.negotiation_mgr._offers[counter_id]
         
-        self._offers[counter_id] = counter
+        self.negotiation_mgr._offers[counter_id] = counter
         
         # 通知原始出价者
         original_agent = original_offer.get("agent_id")
@@ -2092,7 +2100,7 @@ class HubServer:
             }))
             return
             
-        offer = self._offers.get(offer_id)
+        offer = self.negotiation_mgr._offers.get(offer_id)
         if not offer:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -2115,7 +2123,7 @@ class HubServer:
             
         offer["status"] = "accepted"
         listing_id = offer["listing_id"]
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         if listing:
             listing["status"] = "sold"
             # 创建交易记录
@@ -2130,7 +2138,7 @@ class HubServer:
                 "status": "completed",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            self._transactions[transaction_id] = transaction
+            self.transaction_mgr._transactions[transaction_id] = transaction
             print(f"[Server] Transaction created from negotiation: {transaction_id}")
         
         # 通知出价者
@@ -2158,7 +2166,7 @@ class HubServer:
             }))
             return
             
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         if not listing:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -2229,7 +2237,7 @@ class HubServer:
             }))
             return
             
-        listing = self._listings.get(listing_id)
+        listing = self.listing_mgr._listings.get(listing_id)
         if not listing:
             await websocket.send(json.dumps({
                 "type": "error",
@@ -2293,7 +2301,7 @@ class HubServer:
         
         results = []
         for listing_id in listing_ids:
-            listing = self._listings.get(listing_id)
+            listing = self.listing_mgr._listings.get(listing_id)
             if not listing:
                 results.append({
                     "listing_id": listing_id,
@@ -2367,7 +2375,7 @@ class HubServer:
             "status": "completed",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._transactions[transaction_id] = transaction
+        self.transaction_mgr._transactions[transaction_id] = transaction
         
         # 同时记录到 buyer 和 seller 的消费/收入记录
         # (在用户对象中记录，这里先简化为存储在 _transactions 中)
@@ -2387,7 +2395,7 @@ class HubServer:
         
         transactions = []
         
-        for txn in self._transactions.values():
+        for txn in self.transaction_mgr._transactions.values():
             if query_type == "bought":
                 # 查询购买的（消费记录）
                 if agent_id and txn.get("buyer_id") == agent_id:

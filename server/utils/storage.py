@@ -166,9 +166,9 @@ class Storage:
             with self._transaction() as conn:
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO services 
-                    (id, name, description, version, endpoint, status, tags, 
-                     metadata, emoji, requires, execution_mode, interface_spec, 
+                    INSERT OR REPLACE INTO services
+                    (id, name, description, version, endpoint, status, tags,
+                     metadata, emoji, requires, execution_mode, interface_spec,
                      skill_doc, last_heartbeat)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -327,7 +327,7 @@ class Storage:
             with self._transaction() as conn:
                 conn.execute(
                     """
-                    INSERT INTO request_logs 
+                    INSERT INTO request_logs
                     (service_id, method, path, status_code, duration_ms, error)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """,
@@ -397,8 +397,8 @@ class Storage:
             with self._transaction() as conn:
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO key_lifecycle 
-                    (key, service_id, consumer_id, duration_seconds, max_calls, 
+                    INSERT OR REPLACE INTO key_lifecycle
+                    (key, service_id, consumer_id, duration_seconds, max_calls,
                      created_at, expires_at, is_active, call_count)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -459,7 +459,7 @@ class Storage:
             with self._transaction() as conn:
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO users 
+                    INSERT OR REPLACE INTO users
                     (user_id, name, api_key, created_at, is_active)
                     VALUES (?, ?, ?, ?, ?)
                 """,

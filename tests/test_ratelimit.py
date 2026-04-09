@@ -12,7 +12,7 @@ class TestRateLimiter:
     @pytest.fixture
     def limiter(self):
         """Create a rate limiter for testing."""
-        from server.ratelimit import RateLimiter
+        from server.utils.ratelimit import RateLimiter
 
         # 10 requests per second, burst of 10
         return RateLimiter(requests_per_minute=60, burst_size=10)
@@ -106,7 +106,7 @@ class TestMultiLimiter:
     @pytest.fixture
     def multi_limiter(self):
         """Create a multi-limiter for testing."""
-        from server.ratelimit import MultiLimiter
+        from server.utils.ratelimit import MultiLimiter
 
         limiter = MultiLimiter()
         limiter.add_limiter("api", 60, 10)  # 60 req/min
@@ -156,10 +156,10 @@ class TestGetRateLimiter:
     def test_returns_same_instance(self):
         """Test that same instance is returned."""
         # Reset global
-        import server.ratelimit
-        from server.ratelimit import _default_limiter, get_rate_limiter
+        import server.utils.ratelimit
+        from server.utils.ratelimit import _default_limiter, get_rate_limiter
 
-        server.ratelimit._default_limiter = None
+        server.utils.ratelimit._default_limiter = None
 
         limiter1 = get_rate_limiter()
         limiter2 = get_rate_limiter()
@@ -168,11 +168,11 @@ class TestGetRateLimiter:
 
     def test_respects_custom_rate(self):
         """Test that custom rate is respected."""
-        import server.ratelimit
+        import server.utils.ratelimit
 
-        server.ratelimit._default_limiter = None
+        server.utils.ratelimit._default_limiter = None
 
-        from server.ratelimit import get_rate_limiter
+        from server.utils.ratelimit import get_rate_limiter
 
         limiter = get_rate_limiter(requests_per_minute=30)
 

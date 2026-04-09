@@ -42,7 +42,7 @@ class KeyLifecycle:
         return self.is_active and now <= self.expires_at and self.call_count < self.max_calls
 
     def use(self) -> bool:
-        """使用 Key（调用计数+1）"""
+        """使用 Key（调用计数 +1）"""
         if not self.is_valid():
             return False
         self.call_count += 1
@@ -91,10 +91,10 @@ class KeyManager:
             db_path: Path to SQLite database file for persistence (optional)
             storage: Storage instance (optional, for sharing with other managers)
         """
-        # Key 存储: key -> KeyLifecycle
+        # Key 存储：key -> KeyLifecycle
         self._keys: Dict[str, KeyLifecycle] = {}
 
-        # 服务生命周期策略: service_id -> policy
+        # 服务生命周期策略：service_id -> policy
         self._service_policies: Dict[str, dict] = {}
 
         # Storage for persistence
@@ -108,7 +108,7 @@ class KeyManager:
     def _load_from_storage(self):
         """Load keys from SQLite storage."""
         if not self._storage:
-            from server.storage import Storage
+            from server.utils.storage import Storage
 
             self._storage = Storage(self._db_path)
 
@@ -185,8 +185,8 @@ class KeyManager:
         生成 Key
 
         Args:
-            service_id: 服务ID
-            consumer_id: 调用者ID
+            service_id: 服务 ID
+            consumer_id: 调用者 ID
             duration_seconds: 有效时长（秒），None 则使用策略默认值
             max_calls: 最大调用次数，None 则使用策略默认值
             custom_policy: 自定义策略名称
@@ -239,7 +239,7 @@ class KeyManager:
 
         # 1. Key 存在
         if not lifecycle:
-            return {"valid": False, "reason": "Key不存在"}
+            return {"valid": False, "reason": "Key 不存在"}
 
         # 2. 服务匹配
         if service_id != lifecycle.service_id:
@@ -247,19 +247,19 @@ class KeyManager:
 
         # 3. 活跃状态
         if not lifecycle.is_active:
-            return {"valid": False, "reason": "Key已禁用"}
+            return {"valid": False, "reason": "Key 已禁用"}
 
         # 4. 时间验证
         if not lifecycle.is_valid():
             if datetime.now() > lifecycle.expires_at:
-                return {"valid": False, "reason": "Key已过期"}
+                return {"valid": False, "reason": "Key 已过期"}
             if lifecycle.call_count >= lifecycle.max_calls:
                 return {"valid": False, "reason": "调用次数已用尽"}
 
         return {"valid": True, "reason": "", "lifecycle": lifecycle.to_dict()}
 
     def use_key(self, key: str) -> bool:
-        """使用 Key（调用计数+1）"""
+        """使用 Key（调用计数 +1）"""
         lifecycle = self._keys.get(key)
         if lifecycle and lifecycle.is_valid():
             lifecycle.call_count += 1

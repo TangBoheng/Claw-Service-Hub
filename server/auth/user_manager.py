@@ -84,10 +84,10 @@ class UserManager:
             db_path: Path to SQLite database file for persistence (optional)
             storage: Storage instance (optional, for sharing with other managers)
         """
-        # 用户存储: user_id -> User
+        # 用户存储：user_id -> User
         self._users: Dict[str, User] = {}
-        
-        # API Key 索引: api_key -> user_id (快速查找)
+
+        # API Key 索引：api_key -> user_id (快速查找)
         self._api_key_index: Dict[str, str] = {}
 
         # Storage for persistence
@@ -101,7 +101,7 @@ class UserManager:
     def _load_from_storage(self):
         """Load users from SQLite storage."""
         if not self._storage:
-            from server.storage import Storage
+            from server.utils.storage import Storage
             self._storage = Storage(self._db_path)
 
         try:
@@ -122,22 +122,22 @@ class UserManager:
     def create_user(self, name: str = None) -> User:
         """
         创建新用户
-        
+
         Args:
             name: 用户名称（可选，默认自动生成）
-            
+
         Returns:
             User 实例
         """
         user_id = str(uuid.uuid4())[:12]
         user = User(user_id=user_id, name=name)
-        
+
         self._users[user.user_id] = user
         self._api_key_index[user.api_key] = user.user_id
-        
+
         # Persist to storage
         self._save_user(user)
-        
+
         print(f"[UserManager] User created: {user.user_id} (name={user.name})")
         return user
 
@@ -155,21 +155,21 @@ class UserManager:
     def verify_api_key(self, api_key: str) -> Optional[dict]:
         """
         验证 API Key
-        
+
         Returns:
             {"valid": bool, "user": User or None, "reason": str}
         """
         if not api_key:
             return {"valid": False, "user": None, "reason": "API Key 不能为空"}
-        
+
         user = self.get_user_by_api_key(api_key)
-        
+
         if not user:
             return {"valid": False, "user": None, "reason": "无效的 API Key"}
-        
+
         if not user.is_active:
             return {"valid": False, "user": user, "reason": "用户已被禁用"}
-        
+
         return {"valid": True, "user": user, "reason": ""}
 
     def list_users(self, active_only: bool = False) -> List[dict]:

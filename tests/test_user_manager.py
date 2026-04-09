@@ -3,7 +3,7 @@
 """
 
 import pytest
-from server.user_manager import UserManager, User
+from server.auth.user_manager import UserManager, User
 
 
 class TestUserManager:

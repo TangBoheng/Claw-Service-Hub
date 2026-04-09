@@ -11,7 +11,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.storage import Storage, get_storage, init_storage
+from server.utils.storage import Storage, get_storage, init_storage
 
 
 @pytest.fixture
@@ -359,6 +359,5 @@ def test_get_storage_singleton():
         if os.path.exists(db_path):
             os.unlink(db_path)
         # Reset global for other tests
-        import server.storage
-
-        server.storage._storage = None
+        import server.utils.storage
+        server.utils.storage._storage = None

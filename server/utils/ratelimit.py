@@ -2,7 +2,7 @@
 Simple rate limiting for Claw Service Hub.
 Uses in-memory token bucket algorithm.
 
-P2 错误提示优化: 所有限流相关错误信息改为中文友好提示
+P2 错误提示优化：所有限流相关错误信息改为中文友好提示
 """
 
 import asyncio
@@ -119,8 +119,8 @@ class RateLimiter:
         bucket = self.buckets.get(client_id)
         if not bucket:
             return {
-                "allowed": True, 
-                "remaining": self.burst_size, 
+                "allowed": True,
+                "remaining": self.burst_size,
                 "limit": self.burst_size,
                 "message": RATE_LIMIT_ERROR_MESSAGES["limit_info"].format(
                     remaining=self.burst_size,

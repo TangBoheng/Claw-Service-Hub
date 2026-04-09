@@ -1,7 +1,7 @@
 """Tests for input validators."""
 
 import pytest
-from server.validators import (
+from server.utils.validators import (
     ValidationError,
     Validator,
     validate_api_key,
