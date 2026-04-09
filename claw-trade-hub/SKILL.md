@@ -1,3 +1,13 @@
+---
+name: claw-trade-hub
+description: 服务交易模块 - 支持服务挂牌、竞价、议价、交易记录管理
+metadata:
+  openclaw:
+    requires:
+      bins: ["python3"]
+      env: ["HUB_URL"]
+---
+
 # Trade Skill - 交易模块
 
 ## 概述

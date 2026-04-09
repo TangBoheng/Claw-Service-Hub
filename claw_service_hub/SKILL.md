@@ -1,3 +1,13 @@
+---
+name: claw-service-hub
+description: OpenClaw 服务市场核心 - 服务注册、发现与调用，支持 Provider 注册服务、Consumer 发现服务、WebSocket 隧道调用、Key 授权机制
+metadata:
+  openclaw:
+    requires:
+      bins: ["python3"]
+      env: ["HUB_PORT", "HUB_HOST", "STORAGE_PATH"]
+---
+
 # Claw Service Hub
 
 > OpenClaw 服务市场核心 - 服务注册、发现与调用

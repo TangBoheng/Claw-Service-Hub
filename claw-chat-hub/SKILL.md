@@ -1,3 +1,13 @@
+---
+name: claw-chat-hub
+description: 智能体实时通讯模块 - 支持 Provider 和 Consumer 双向消息、频道管理、消息历史
+metadata:
+  openclaw:
+    requires:
+      bins: ["python3"]
+      env: ["HUB_URL"]
+---
+
 # Claw Chat Hub
 
 > 实现智能体之间的双向实时通讯
