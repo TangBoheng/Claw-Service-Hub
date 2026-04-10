@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claw-client"
+version = "0.2.0"
+description = "Claw Service Hub Client SDK - 让 AI Agent 之间的服务发现与调用像呼吸一样简单"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Claw Service Hub Team", email = "team@claw-service-hub.io"}
+]
+maintainers = [
+    {name = "Claw Service Hub Team"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=12.0",
+]
+keywords = [
+    "service-hub",
+    "websocket",
+    "microservices",
+    "agent",
+    "ai-agent",
+    "service-discovery",
+    "rpc",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/TangBoheng/Claw-Service-Hub"
+Documentation = "https://tangboheng.github.io/Claw-Service-Hub"
+Repository = "https://github.com/TangBoheng/Claw-Service-Hub.git"
+Issues = "https://github.com/TangBoheng/Claw-Service-Hub/issues"
+Changelog = "https://github.com/TangBoheng/Claw-Service-Hub/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "black>=23.0.0",
+]
+
+[project.scripts]
+claw-client = "claw_client.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["claw_client*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]

@@ -16,10 +16,8 @@ Claw Service Hub - 统一客户端
 
 import asyncio
 import json
-import os
 import uuid
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 import websockets
 from websockets.client import WebSocketClientProtocol
@@ -128,7 +126,7 @@ class HubClient:
         self.running = False
         if self.websocket:
             await self.websocket.close()
-        print(f"[HubClient] Disconnected")
+        print("[HubClient] Disconnected")
 
     async def _receive_loop(self):
         """接收消息循环"""
@@ -136,7 +134,7 @@ class HubClient:
             async for message in self.websocket:
                 await self._process_message(message)
         except websockets.exceptions.ConnectionClosed:
-            print(f"[HubClient] Connection closed")
+            print("[HubClient] Connection closed")
             self.running = False
             if self.auto_reconnect:
                 await self._reconnect()
@@ -218,7 +216,7 @@ class HubClient:
 
     async def _reconnect(self):
         """自动重连"""
-        print(f"[HubClient] Attempting to reconnect...")
+        print("[HubClient] Attempting to reconnect...")
         await asyncio.sleep(5)
         await self.connect()
 

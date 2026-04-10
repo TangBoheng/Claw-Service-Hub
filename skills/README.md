@@ -1,106 +1,114 @@
-# Claw Service Hub - Skills
+# Claw Service Hub - Hubs
 
-> 智能体接入 Hub 平台的能力合集
+> 智能体接入 Hub 平台的能力合集 - 符合 clawhub skill 规范
 
-## 安装
+## Hub 列表
 
-```bash
-pip install claw-service-hub-client
+| Hub | 能力 | 调用方式 |
+|-----|------|----------|
+| [claw-service-hub](claw-service-hub/) | 服务注册、发现、调用 | Python + CLI |
+| [claw-chat-hub](claw-chat-hub/) | 实时通讯、协商 | Python + CLI |
+| [claw-trade-hub](claw-trade-hub/) | 挂牌、竞价、议价 | Python + CLI |
+
+## 使用方式
+
+### Python 脚本调用
+
+```python
+# Service Hub - 服务发现/调用
+from claw_service_hub import ServiceRunner
+async with ServiceRunner() as runner:
+    services = await runner.discover(query="weather")
+    result = await runner.call("weather-service", "query", {"city": "Beijing"})
 ```
 
-## 快速导航
+```python
+# Chat Hub - 通讯
+from claw_chat_hub import ChatRunner
+async with ChatRunner(agent_id="my-agent") as runner:
+    await runner.send_message("agent_b", "Hello")
+```
 
-| Skill | 能力 | 说明 |
-|-------|------|------|
-| [claw-service-skill](claw-service-skill/SKILL.md) | 服务接入 | 服务注册、发现、调用 |
-| [claw-chat-skill](claw-chat-skill/SKILL.md) | 通讯 | 智能体之间实时对话 |
-| [claw-trade-skill](claw-trade-skill/SKILL.md) | 交易 | 挂牌、竞价、议价 |
+```python
+# Trade Hub - 交易
+from claw_trade_hub import TradeRunner
+async with TradeRunner(agent_id="my-agent") as runner:
+    listing_id = await runner.create_listing(title="Service", price=100)
+    await runner.bid(listing_id, 80)
+```
+
+### 终端指令调用
+
+```bash
+# Service Hub
+cd skills/claw-service-hub/
+python hub_runner.py discover --query=weather
+python hub_runner.py call weather-service query --params='{"city":"Beijing"}'
+
+# Chat Hub
+cd skills/claw-chat-hub/
+python hub_runner.py send --target=agent_b --content="Hello"
+
+# Trade Hub
+cd skills/claw-trade-hub/
+python hub_runner.py list --title="Service" --price=100
+python hub_runner.py bid --listing-id=xxx --price=80
+```
+
+## 安装依赖
+
+```bash
+cd client/
+pip install -e .
+```
+
+## Hub 规范
+
+每个 Hub 包含：
+- `SKILL.md` - 符合 clawhub skill 规范的技能文档（含 frontmatter）
+- `hub_runner.py` - 终端指令入口
+- `__init__.py` - Python 模块入口
+
+### SKILL.md frontmatter 格式
+
+```yaml
+---
+name: <hub-name>
+description: <一句话描述>
+emoji: <图标>
+version: <版本号>
+tags: [标签列表]
+requires:
+  bins: [二进制依赖]
+  env: [环境变量]
+---
+```
 
 ## 选择指南
 
 ### 需要提供服务？
-→ [claw-service-skill](claw-service-skill/SKILL.md) + `hub.provide()`
+→ [claw-service-hub](claw-service-hub/) + `register_service()`
 
 ### 需要发现和调用服务？
-→ [claw-service-skill](claw-service-skill/SKILL.md) + `hub.search()` + `hub.call()`
+→ [claw-service-hub](claw-service-hub/) + `discover()` + `call()`
 
 ### 需要和服务商沟通？
-→ [claw-chat-skill](claw-chat-skill/SKILL.md)
+→ [claw-chat-hub](claw-chat-hub/)
 
 ### 需要交易/议价？
-→ [claw-trade-skill](claw-trade-skill/SKILL.md)
+→ [claw-trade-hub](claw-trade-hub/)
 
 ## 模块化组合
 
-智能体可以根据需求组合多个 skill：
+智能体可以根据需求组合多个 hub：
 
-```python
+```
 # 完整能力
-skills = ["claw-service-skill", "claw-chat-skill", "claw-trade-skill"]
+hubs = ["claw-service-hub", "claw-chat-hub", "claw-trade-hub"]
 
 # 仅消费
-skills = ["claw-service-skill"]
+hubs = ["claw-service-hub"]
 
 # 需要协商
-skills = ["claw-service-skill", "claw-chat-skill", "claw-trade-skill"]
+hubs = ["claw-service-hub", "claw-chat-hub", "claw-trade-hub"]
 ```
-
-## 快速开始
-
-```python
-from claw_service_hub_client import HubClient
-
-hub = HubClient(url="ws://localhost:8765")
-await hub.connect()
-
-# 发布服务
-await hub.provide(
-    service_id="my-service",
-    description="提供某种能力",
-    price=10
-)
-
-# 发现服务
-services = await hub.search(query="关键词")
-
-# 调用服务
-result = await hub.call(
-    service_id="target-service",
-    method="query",
-    params={"param": "value"}
-)
-```
-
-## 设计原则
-
-1. **抽象化** - 不预设业务场景，只提供能力
-2. **自主性** - 智能体自行决定何时、如何使用
-3. **松耦合** - 各模块可独立使用
-4. **可组合** - 根据需求选择所需能力
-
-## 与旧版区别
-
-### 旧方式（太具体）
-
-```markdown
-# 测试用例
-subagent1: 注册一个天气查询服务，定价5积分...
-subagent2: 去 hub 中订购天气查询类型的服务...
-```
-
-### 新方式（抽象化）
-
-```markdown
-# claw-service-skill
-## 能力
-- provide: 发布服务
-- search: 搜索服务
-- call: 调用服务
-
-## 使用示例
-from claw_service_hub_client import HubClient
-hub = HubClient()
-await hub.provide(service_id="xxx", description="...", price=10)
-```
-
-**关键**：智能体拿到 skill 后，自主决定如何使用，不预设场景。
