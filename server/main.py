@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
 try:
     from server.auth.key_manager import KeyManager, key_manager
-    from server.rating import RatingManager, get_rating_manager
+    from server.utils.rating import RatingManager, get_rating_manager
     from server.core.registry import ServiceRegistry, ToolService, get_registry
     from server.core.tunnel import TunnelManager, get_tunnel_manager
     from server.auth.user_manager import UserManager, user_manager
@@ -39,10 +39,11 @@ try:
     from server.trade.bid import BidManager, get_bid_manager
     from server.trade.negotiation import NegotiationManager, get_negotiation_manager
     from server.trade.transaction import TransactionManager, get_transaction_manager
+    from server.trade.handlers import TradeHandler
 except ImportError:
     # 备用: 直接导入 (当 PYTHONPATH 正确设置时)
     from auth.key_manager import KeyManager, key_manager
-    from rating import RatingManager, get_rating_manager
+    from server.utils.rating import RatingManager, get_rating_manager
     from core.registry import ServiceRegistry, ToolService, get_registry
     from core.tunnel import TunnelManager, get_tunnel_manager
     from auth.user_manager import UserManager, user_manager
@@ -85,6 +86,15 @@ class HubServer:
         self.bid_mgr = get_bid_manager()
         self.negotiation_mgr = get_negotiation_manager()
         self.transaction_mgr = get_transaction_manager()
+
+        # Trade 消息处理器
+        self.trade_handler = TradeHandler(
+            listing_mgr=self.listing_mgr,
+            bid_mgr=self.bid_mgr,
+            negotiation_mgr=self.negotiation_mgr,
+            transaction_mgr=self.transaction_mgr,
+            client_websockets=self._client_websockets,
+        )
 
         self.clients: Set[ServerConnection] = set()
         self.running = False
@@ -301,64 +311,40 @@ class HubServer:
 
             # === Trade 交易相关 ===
             elif msg_type == "listing_create":
-                # 创建挂牌
-                await self._handle_listing_create(websocket, client_id, message)
+                await self.trade_handler.handle_listing_create(websocket, client_id, message)
 
             elif msg_type == "listing_query":
-                # 查询挂牌
-                await self._handle_listing_query(websocket, client_id, message)
+                await self.trade_handler.handle_listing_query(websocket, client_id, message)
 
             elif msg_type == "bid_create":
-                # 创建出价
-                await self._handle_bid_create(websocket, client_id, message)
+                await self.trade_handler.handle_bid_create(websocket, client_id, message)
 
             elif msg_type == "bid_accept":
-                # 接受出价
-                await self._handle_bid_accept(websocket, client_id, message)
+                await self.trade_handler.handle_bid_accept(websocket, client_id, message)
 
             elif msg_type == "negotiation_offer":
-                # 议价出价
-                await self._handle_negotiation_offer(websocket, client_id, message)
+                await self.trade_handler.handle_negotiation_offer(websocket, client_id, message)
 
             elif msg_type == "negotiation_counter":
-                # 议价还价
-                await self._handle_negotiation_counter(websocket, client_id, message)
+                await self.trade_handler.handle_negotiation_counter(websocket, client_id, message)
 
             elif msg_type == "negotiation_accept":
-                # 接受议价
-                await self._handle_negotiation_accept(websocket, client_id, message)
-
-            elif msg_type == "rate":
-                # 服务评分
-                await self._handle_rate(websocket, client_id, message)
-
-            elif msg_type == "get_rating":
-                # 获取服务评分
-                await self._handle_get_rating(websocket, client_id, message)
+                await self.trade_handler.handle_negotiation_accept(websocket, client_id, message)
 
             elif msg_type == "listing_cancel":
-                # 取消挂牌/订单（TC009）
-                await self._handle_listing_cancel(websocket, client_id, message)
+                await self.trade_handler.handle_listing_cancel(websocket, client_id, message)
 
             elif msg_type == "listing_update_price":
-                # 修改挂牌价格（TC010）
-                await self._handle_listing_update_price(websocket, client_id, message)
-
-            elif msg_type == "set_price":
-                # 设置/更新服务价格（支持比价功能 TC004）
-                await self._handle_set_price(websocket, client_id, message)
+                await self.trade_handler.handle_listing_update_price(websocket, client_id, message)
 
             elif msg_type == "listing_cancel_batch":
-                # 批量下架（TC011）
-                await self._handle_listing_cancel_batch(websocket, client_id, message)
+                await self.trade_handler.handle_listing_cancel_batch(websocket, client_id, message)
 
             elif msg_type == "transaction_create":
-                # 创建交易记录
-                await self._handle_transaction_create(websocket, client_id, message)
+                await self.trade_handler.handle_transaction_create(websocket, client_id, message)
 
             elif msg_type == "transaction_query":
-                # 查询交易记录（TC012）
-                await self._handle_transaction_query(websocket, client_id, message)
+                await self.trade_handler.handle_transaction_query(websocket, client_id, message)
 
             else:
                 print(f"[Server] Unknown message type: {msg_type}")
@@ -1759,679 +1745,6 @@ class HubServer:
         }))
 
         print(f"[Server] Chat history: {len(messages)} messages for {service_id or channel_id}")
-
-    # ========== Trade 交易处理方法 ==========
-
-    async def _handle_listing_create(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理创建挂牌"""
-        # 验证必填字段
-        required_fields = ["listing_id", "title", "price"]
-        missing = [f for f in required_fields if not message.get(f)]
-        if missing:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_FIELDS",
-                "message": f"Missing required fields: {missing}",
-                "details": "listing_id, title, and price are required"
-            }))
-            return
-            
-        price = message.get("price")
-        if not isinstance(price, (int, float)) or price <= 0:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "INVALID_PRICE",
-                "message": "Invalid price value",
-                "details": "Price must be a positive number"
-            }))
-            return
-            
-        listing_id = message.get("listing_id")
-        listing = {
-            "listing_id": listing_id,
-            "agent_id": message.get("agent_id"),
-            "title": message.get("title"),
-            "description": message.get("description"),
-            "price": price,
-            "category": message.get("category", "service"),
-            "status": "active",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self.listing_mgr._listings[listing_id] = listing
-        await websocket.send(json.dumps({
-            "type": "listing_created",
-            "listing_id": listing_id,
-            "status": "active",
-        }))
-        print(f"[Server] Listing created: {listing_id} by {listing['agent_id']}")
-
-    async def _handle_listing_query(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理查询挂牌"""
-        request_id = message.get("request_id")
-        category = message.get("category")
-        listings = [l for l in self.listing_mgr._listings.values() if l.get("status") == "active"]
-        if category:
-            listings = [l for l in listings if l.get("category") == category]
-        await websocket.send(json.dumps({
-            "type": "listing_query_response",
-            "request_id": request_id,
-            "listings": listings,
-            "total": len(listings),
-        }))
-        print(f"[Server] Listing query: {len(listings)} results")
-
-    async def _handle_bid_create(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理创建出价"""
-        # 验证必填字段
-        required_fields = ["bid_id", "listing_id", "price"]
-        missing = [f for f in required_fields if not message.get(f)]
-        if missing:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_FIELDS",
-                "message": f"Missing required fields: {missing}",
-                "details": "bid_id, listing_id, and price are required"
-            }))
-            return
-            
-        bid_id = message.get("bid_id")
-        listing_id = message.get("listing_id")
-        listing = self.listing_mgr._listings.get(listing_id)
-        
-        if not listing:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_FOUND",
-                "message": f"Listing not found: {listing_id}",
-                "details": "The listing does not exist or has been removed"
-            }))
-            return
-            
-        if listing.get("status") != "active":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_ACTIVE",
-                "message": f"Listing is not active: {listing.get('status')}",
-                "details": "Cannot bid on inactive listing"
-            }))
-            return
-            
-        price = message.get("price")
-        if not isinstance(price, (int, float)) or price <= 0:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "INVALID_PRICE",
-                "message": "Invalid price value",
-                "details": "Price must be a positive number"
-            }))
-            return
-            
-        bid = {
-            "bid_id": bid_id,
-            "listing_id": listing_id,
-            "agent_id": message.get("agent_id"),
-            "price": price,
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self.bid_mgr._bids[bid_id] = bid
-        # 通知挂牌所有者
-        owner_ws = self._client_websockets.get(listing.get("agent_id"))
-        if owner_ws:
-            await owner_ws.send(json.dumps({"type": "bid_received", "bid": bid}))
-        await websocket.send(json.dumps({"type": "bid_created", "bid_id": bid_id}))
-        print(f"[Server] Bid created: {bid_id} for listing {listing_id}")
-
-    async def _handle_bid_accept(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理接受出价"""
-        bid_id = message.get("bid_id")
-        if not bid_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_BID_ID",
-                "message": "Missing bid_id",
-                "details": "bid_id is required"
-            }))
-            return
-            
-        bid = self.bid_mgr._bids.get(bid_id)
-        if not bid:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "BID_NOT_FOUND",
-                "message": f"Bid not found: {bid_id}",
-                "details": "The bid does not exist or has expired"
-            }))
-            return
-            
-        if bid.get("status") != "pending":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "BID_NOT_PENDING",
-                "message": f"Bid is not pending: {bid.get('status')}",
-                "details": "This bid has already been processed"
-            }))
-            return
-            
-        bid["status"] = "accepted"
-        listing_id = bid["listing_id"]
-        listing = self.listing_mgr._listings.get(listing_id)
-        if listing:
-            listing["status"] = "sold"
-            # 创建交易记录
-            transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
-            transaction = {
-                "transaction_id": transaction_id,
-                "listing_id": listing_id,
-                "buyer_id": bid.get("agent_id"),
-                "seller_id": listing.get("agent_id"),
-                "price": bid.get("price"),
-                "type": "bid",
-                "status": "completed",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self.transaction_mgr._transactions[transaction_id] = transaction
-            print(f"[Server] Transaction created from bid: {transaction_id}")
-        
-        # 通知出价者
-        bidder_ws = self._client_websockets.get(bid.get("agent_id"))
-        if bidder_ws:
-            await bidder_ws.send(json.dumps({"type": "bid_accepted", "bid_id": bid_id}))
-        await websocket.send(json.dumps({"type": "bid_accept_response", "bid_id": bid_id, "status": "accepted"}))
-        print(f"[Server] Bid accepted: {bid_id}")
-
-    async def _handle_negotiation_offer(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理议价出价"""
-        request_id = message.get("request_id")
-        offer_id = message.get("offer_id")
-        listing_id = message.get("listing_id")
-        
-        # 验证 listing_id
-        if not listing_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_LISTING_ID",
-                "message": "Missing listing_id",
-                "details": "listing_id is required",
-                "request_id": request_id
-            }))
-            return
-            
-        listing = self.listing_mgr._listings.get(listing_id)
-        if not listing:
-            await websocket.send(json.dumps({
-                "type": "error", 
-                "error_code": "LISTING_NOT_FOUND",
-                "message": f"Listing not found: {listing_id}",
-                "details": "The listing does not exist or has been removed",
-                "request_id": request_id
-            }))
-            return
-        
-        # 验证价格
-        price = message.get("price")
-        if price is None or not isinstance(price, (int, float)) or price <= 0:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "INVALID_PRICE",
-                "message": "Invalid price value",
-                "details": "Price must be a positive number",
-                "request_id": request_id
-            }))
-            return
-            
-        # 检查 listing 状态
-        if listing.get("status") != "active":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_ACTIVE",
-                "message": f"Listing is not active: {listing.get('status')}",
-                "details": "Cannot make offer on inactive listing",
-                "request_id": request_id
-            }))
-            return
-            
-        offer = {
-            "offer_id": offer_id,
-            "listing_id": listing_id,
-            "agent_id": message.get("agent_id"),
-            "price": price,
-            "type": "offer",
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self.negotiation_mgr._offers[offer_id] = offer
-        # 通知挂牌所有者
-        owner_ws = self._client_websockets.get(listing.get("agent_id"))
-        if owner_ws:
-            await owner_ws.send(json.dumps({"type": "negotiation_received", "offer": offer}))
-        await websocket.send(json.dumps({"type": "negotiation_sent", "offer_id": offer_id, "request_id": request_id}))
-        print(f"[Server] Negotiation offer: {offer_id}")
-
-    async def _handle_negotiation_counter(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理议价还价"""
-        request_id = message.get("request_id")
-        offer_id = message.get("offer_id")  # 这是客户端传来的原始 offer_id
-        original_offer = self.negotiation_mgr._offers.get(offer_id)
-        if not original_offer:
-            await websocket.send(json.dumps({
-                "type": "error", 
-                "error_code": "OFFER_NOT_FOUND",
-                "message": f"Offer not found: {offer_id}",
-                "details": "The original offer ID does not exist or has expired",
-                "request_id": request_id
-            }))
-            return
-        
-        # 验证价格
-        price = message.get("price")
-        if price is None or not isinstance(price, (int, float)) or price <= 0:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "INVALID_PRICE",
-                "message": "Invalid price value",
-                "details": "Price must be a positive number",
-                "request_id": request_id
-            }))
-            return
-        
-        # 验证 listing_id
-        listing_id = message.get("listing_id")
-        if not listing_id or listing_id not in self.listing_mgr._listings:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_FOUND",
-                "message": f"Listing not found: {listing_id}",
-                "details": "The listing ID does not exist",
-                "request_id": request_id
-            }))
-            return
-            
-        # 使用客户端提供的 offer_id 作为 counter 的 ID
-        # 这样客户端可以正确追踪其 counter offer
-        counter_id = offer_id  # 使用原始 offer_id 作为 counter ID（简化追踪）
-        
-        counter = {
-            "offer_id": counter_id,
-            "listing_id": listing_id,
-            "agent_id": message.get("agent_id"),
-            "price": price,
-            "type": "counter",
-            "parent_offer_id": offer_id,  # 保留对原始 offer 的引用
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        
-        # 如果已存在相同 ID 的 offer，先删除旧的
-        if counter_id in self.negotiation_mgr._offers:
-            del self.negotiation_mgr._offers[counter_id]
-        
-        self.negotiation_mgr._offers[counter_id] = counter
-        
-        # 通知原始出价者
-        original_agent = original_offer.get("agent_id")
-        original_ws = self._client_websockets.get(original_agent)
-        if original_ws:
-            await original_ws.send(json.dumps({
-                "type": "negotiation_counter", 
-                "offer": counter,
-                "parent_offer_id": offer_id  # 明确告知这是对哪个 offer 的还价
-            }))
-        
-        await websocket.send(json.dumps({
-            "type": "negotiation_counter_sent", 
-            "offer_id": counter_id,
-            "parent_offer_id": offer_id,
-            "request_id": request_id
-        }))
-        print(f"[Server] Negotiation counter: {counter_id} (parent: {offer_id})")
-
-    async def _handle_negotiation_accept(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理接受议价"""
-        request_id = message.get("request_id")
-        offer_id = message.get("offer_id")
-        if not offer_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_OFFER_ID",
-                "message": "Missing offer_id",
-                "details": "offer_id is required",
-                "request_id": request_id
-            }))
-            return
-            
-        offer = self.negotiation_mgr._offers.get(offer_id)
-        if not offer:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "OFFER_NOT_FOUND",
-                "message": f"Offer not found: {offer_id}",
-                "details": "The offer does not exist or has expired",
-                "request_id": request_id
-            }))
-            return
-            
-        if offer.get("status") != "pending":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "OFFER_NOT_PENDING",
-                "message": f"Offer is not pending: {offer.get('status')}",
-                "details": "This offer has already been processed",
-                "request_id": request_id
-            }))
-            return
-            
-        offer["status"] = "accepted"
-        listing_id = offer["listing_id"]
-        listing = self.listing_mgr._listings.get(listing_id)
-        if listing:
-            listing["status"] = "sold"
-            # 创建交易记录
-            transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
-            transaction = {
-                "transaction_id": transaction_id,
-                "listing_id": listing_id,
-                "buyer_id": offer.get("agent_id"),
-                "seller_id": listing.get("agent_id"),
-                "price": offer.get("price"),
-                "type": "negotiation",
-                "status": "completed",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self.transaction_mgr._transactions[transaction_id] = transaction
-            print(f"[Server] Transaction created from negotiation: {transaction_id}")
-        
-        # 通知出价者
-        offer_agent = offer.get("agent_id")
-        offer_ws = self._client_websockets.get(offer_agent)
-        if offer_ws:
-            await offer_ws.send(json.dumps({"type": "negotiation_accepted", "offer_id": offer_id}))
-        await websocket.send(json.dumps({"type": "negotiation_accept_response", "offer_id": offer_id, "status": "accepted", "request_id": request_id}))
-        print(f"[Server] Negotiation accepted: {offer_id}")
-
-    # ========== 交易功能增强 ==========
-    
-    async def _handle_listing_cancel(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理取消挂牌（TC009 取消订单）"""
-        request_id = message.get("request_id")
-        listing_id = message.get("listing_id")
-        
-        if not listing_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_LISTING_ID",
-                "message": "Missing listing_id",
-                "details": "listing_id is required",
-                "request_id": request_id
-            }))
-            return
-            
-        listing = self.listing_mgr._listings.get(listing_id)
-        if not listing:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_FOUND",
-                "message": f"Listing not found: {listing_id}",
-                "details": "The listing does not exist or has been removed",
-                "request_id": request_id
-            }))
-            return
-        
-        # 验证权限（只有挂牌所有者可以取消）
-        if listing.get("agent_id") != client_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "PERMISSION_DENIED",
-                "message": "Permission denied",
-                "details": "Only the listing owner can cancel this listing",
-                "request_id": request_id
-            }))
-            return
-        
-        # 检查挂牌状态
-        if listing.get("status") == "sold":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_ALREADY_SOLD",
-                "message": "Listing already sold",
-                "details": "Cannot cancel a listing that has been sold",
-                "request_id": request_id
-            }))
-            return
-        
-        # 取消挂牌
-        listing["status"] = "cancelled"
-        listing["cancelled_at"] = datetime.now(timezone.utc).isoformat()
-        
-        await websocket.send(json.dumps({
-            "type": "listing_cancelled",
-            "listing_id": listing_id,
-            "status": "cancelled",
-            "request_id": request_id
-        }))
-        print(f"[Server] Listing cancelled: {listing_id}")
-
-    async def _handle_listing_update_price(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理修改挂牌价格（TC010 修改价格）"""
-        request_id = message.get("request_id")
-        listing_id = message.get("listing_id")
-        new_price = message.get("price")
-        
-        if not listing_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_LISTING_ID",
-                "message": "Missing listing_id",
-                "details": "listing_id is required",
-                "request_id": request_id
-            }))
-            return
-        
-        if new_price is None or not isinstance(new_price, (int, float)) or new_price <= 0:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "INVALID_PRICE",
-                "message": "Invalid price value",
-                "details": "Price must be a positive number",
-                "request_id": request_id
-            }))
-            return
-            
-        listing = self.listing_mgr._listings.get(listing_id)
-        if not listing:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_FOUND",
-                "message": f"Listing not found: {listing_id}",
-                "details": "The listing does not exist or has been removed",
-                "request_id": request_id
-            }))
-            return
-        
-        # 验证权限
-        if listing.get("agent_id") != client_id:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "PERMISSION_DENIED",
-                "message": "Permission denied",
-                "details": "Only the listing owner can update the price",
-                "request_id": request_id
-            }))
-            return
-        
-        # 检查挂牌状态
-        if listing.get("status") != "active":
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "LISTING_NOT_ACTIVE",
-                "message": f"Listing is not active: {listing.get('status')}",
-                "details": "Cannot update price of inactive listing",
-                "request_id": request_id
-            }))
-            return
-        
-        old_price = listing.get("price")
-        listing["price"] = new_price
-        listing["updated_at"] = datetime.now(timezone.utc).isoformat()
-        
-        await websocket.send(json.dumps({
-            "type": "listing_price_updated",
-            "listing_id": listing_id,
-            "old_price": old_price,
-            "new_price": new_price,
-            "status": "active",
-            "request_id": request_id
-        }))
-        print(f"[Server] Listing price updated: {listing_id} ({old_price} -> {new_price})")
-
-    async def _handle_listing_cancel_batch(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理批量下架（TC011 批量下架）"""
-        request_id = message.get("request_id")
-        listing_ids = message.get("listing_ids", [])
-        
-        if not listing_ids:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_LISTING_IDS",
-                "message": "Missing listing_ids",
-                "details": "listing_ids is required and must not be empty",
-                "request_id": request_id
-            }))
-            return
-        
-        results = []
-        for listing_id in listing_ids:
-            listing = self.listing_mgr._listings.get(listing_id)
-            if not listing:
-                results.append({
-                    "listing_id": listing_id,
-                    "status": "error",
-                    "reason": "Listing not found"
-                })
-                continue
-            
-            # 验证权限
-            if listing.get("agent_id") != client_id:
-                results.append({
-                    "listing_id": listing_id,
-                    "status": "error",
-                    "reason": "Permission denied"
-                })
-                continue
-            
-            # 检查状态
-            if listing.get("status") == "sold":
-                results.append({
-                    "listing_id": listing_id,
-                    "status": "error",
-                    "reason": "Listing already sold"
-                })
-                continue
-            
-            # 取消挂牌
-            listing["status"] = "cancelled"
-            listing["cancelled_at"] = datetime.now(timezone.utc).isoformat()
-            results.append({
-                "listing_id": listing_id,
-                "status": "cancelled"
-            })
-        
-        success_count = sum(1 for r in results if r["status"] == "cancelled")
-        await websocket.send(json.dumps({
-            "type": "listing_cancelled_batch",
-            "results": results,
-            "total": len(listing_ids),
-            "success_count": success_count,
-            "request_id": request_id
-        }))
-        print(f"[Server] Batch cancel: {success_count}/{len(listing_ids)} listings cancelled")
-
-    # 交易记录存储: transaction_id -> transaction
-    _transactions: Dict[str, dict] = {}
-    
-    async def _handle_transaction_create(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理创建交易记录（购买成交时记录）"""
-        transaction_id = message.get("transaction_id")
-        listing_id = message.get("listing_id")
-        buyer_id = message.get("buyer_id")
-        seller_id = message.get("seller_id")
-        price = message.get("price")
-        
-        if not all([transaction_id, listing_id, buyer_id, seller_id, price]):
-            await websocket.send(json.dumps({
-                "type": "error",
-                "error_code": "MISSING_FIELDS",
-                "message": "Missing required fields",
-                "details": "transaction_id, listing_id, buyer_id, seller_id, and price are required"
-            }))
-            return
-        
-        transaction = {
-            "transaction_id": transaction_id,
-            "listing_id": listing_id,
-            "buyer_id": buyer_id,
-            "seller_id": seller_id,
-            "price": price,
-            "status": "completed",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self.transaction_mgr._transactions[transaction_id] = transaction
-        
-        # 同时记录到 buyer 和 seller 的消费/收入记录
-        # (在用户对象中记录，这里先简化为存储在 _transactions 中)
-        
-        await websocket.send(json.dumps({
-            "type": "transaction_created",
-            "transaction_id": transaction_id,
-            "status": "completed"
-        }))
-        print(f"[Server] Transaction created: {transaction_id}")
-
-    async def _handle_transaction_query(self, websocket: ServerConnection, client_id: str, message: dict):
-        """处理查询交易记录（TC012 查询消费记录）"""
-        request_id = message.get("request_id")
-        query_type = message.get("query_type", "all")  # all, bought, sold
-        agent_id = message.get("agent_id")  # 可选：查询特定用户的记录
-        
-        transactions = []
-        
-        for txn in self.transaction_mgr._transactions.values():
-            if query_type == "bought":
-                # 查询购买的（消费记录）
-                if agent_id and txn.get("buyer_id") == agent_id:
-                    transactions.append(txn)
-                elif not agent_id and txn.get("buyer_id") == client_id:
-                    transactions.append(txn)
-            elif query_type == "sold":
-                # 查询销售的（收入记录）
-                if agent_id and txn.get("seller_id") == agent_id:
-                    transactions.append(txn)
-                elif not agent_id and txn.get("seller_id") == client_id:
-                    transactions.append(txn)
-            else:
-                # 全部记录
-                if agent_id:
-                    if txn.get("buyer_id") == agent_id or txn.get("seller_id") == agent_id:
-                        transactions.append(txn)
-                else:
-                    if txn.get("buyer_id") == client_id or txn.get("seller_id") == client_id:
-                        transactions.append(txn)
-        
-        # 计算总消费/收入
-        total_spent = sum(t.get("price", 0) for t in transactions if t.get("buyer_id") == (agent_id or client_id))
-        total_earned = sum(t.get("price", 0) for t in transactions if t.get("seller_id") == (agent_id or client_id))
-        
-        await websocket.send(json.dumps({
-            "type": "transaction_query_response",
-            "request_id": request_id,
-            "transactions": transactions,
-            "total": len(transactions),
-            "total_spent": total_spent,
-            "total_earned": total_earned,
-            "query_type": query_type
-        }))
-        print(f"[Server] Transaction query: {len(transactions)} records for {agent_id or client_id}")
-
 
 def main():
     """入口"""
