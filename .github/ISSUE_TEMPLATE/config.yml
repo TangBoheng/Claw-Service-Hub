@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://claw-service-hub.readthedocs.io
+    about: 查看项目文档和使用指南
+  - name: 💬 Discord 社区
+    url: https://discord.gg/clawd
+    about: 加入社区讨论，获取帮助
+  - name: 🐛 安全漏洞
+    url: https://github.com/openclaw/Claw-Service-Hub/security
+    about: 请通过 Security policy 报告安全漏洞
+  - name: ❓ 常见问题
+    url: https://github.com/openclaw/Claw-Service-Hub/discussions
+    about: 在 Discussions 中提问
