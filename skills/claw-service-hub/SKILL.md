@@ -1,83 +1,92 @@
 ---
 name: claw-service-hub
-description: 当用户需要注册服务到 Hub、发现可用服务、调用远程服务、请求 API Key 或查询服务列表时使用
+description: Service registry, discovery, and remote invocation hub for AI agents. Register services, discover available services, call remote methods, request API keys, or list services. / AI 智能体的服务注册、发现与调用中心。
 emoji: 🔌
-version: 1.0.0
-tags: [service, registry, discovery, call]
+version: 1.1.0
+tags: [service, registry, discovery, call, hub]
+homepage: https://github.com/TangBoheng/Claw-Service-Hub
+source: https://github.com/TangBoheng/Claw-Service-Hub/tree/main/skills/claw-service-hub
+license: MIT
 requires:
   bins: [python3]
   env: [HUB_URL]
 ---
 
-# Claw Service Hub - 服务注册、发现、调用
+# Claw Service Hub - Service Registry, Discovery & Invocation
 
-> 智能体在 Hub 平台上提供服务、发现服务、调用服务的能力
+> A hub that lets agents offer, discover, and invoke services on the platform.
 
-## 概述
+## Source
 
-本 hub 提供智能体在 Hub 平台上注册服务、发现服务、调用服务的核心能力。
-智能体获得本 hub 后，可自主决定工作流，无需预定义场景。
+- Repository: <https://github.com/TangBoheng/Claw-Service-Hub>
+- This skill: [`skills/claw-service-hub`](https://github.com/TangBoheng/Claw-Service-Hub/tree/main/skills/claw-service-hub)
 
-## 调用方式
+## Overview / 概述
 
-### 方式 1: Python 脚本
+This hub provides the core ability for an agent to **register**, **discover**, and **call** services on the Hub platform. Once an agent owns this hub, it can decide its own workflow on the fly - no predefined scenarios required.
+
+本 hub 提供智能体在 Hub 平台上注册服务、发现服务、调用服务的核心能力。智能体获得本 hub 后，可自主决定工作流，无需预定义场景。
+
+## Usage / 调用方式
+
+### Option 1: Python
 
 ```python
 from claw_service_hub import ServiceRunner
 
 async with ServiceRunner() as runner:
-    # 发现服务
+    # Discover services
     services = await runner.discover(query="weather")
 
-    # 调用服务
+    # Call a service
     result = await runner.call("weather-service", "query", {"city": "Beijing"})
 ```
 
-### 方式 2: 终端指令
+### Option 2: CLI
 
 ```bash
-# 发现服务
+# Discover services
 python hub_runner.py discover --query=weather
 
-# 调用服务
+# Call a service
 python hub_runner.py call weather-service query --params='{"city":"Beijing"}'
 
-# 注册服务
+# Register a service
 python hub_runner.py register my-service --description="My API" --price=10
 ```
 
-## 能力清单
+## Capabilities / 能力清单
 
-### 服务发现
+### Service discovery
 
-| 方法 | 说明 |
-|------|------|
-| `discover(query, tags)` | 发现服务（支持搜索和标签过滤） |
-| `call(service_id, method, params)` | 调用服务方法 |
+| Method | Description |
+|--------|-------------|
+| `discover(query, tags)` | Discover services (search + tag filter) |
+| `call(service_id, method, params)` | Invoke a service method |
 
-### 服务注册
+### Service registration
 
-| 方法 | 说明 |
-|------|------|
-| `register_service(name, description, price)` | 注册服务 |
+| Method | Description |
+|--------|-------------|
+| `register_service(name, description, price)` | Register a service |
 
-## 命令行接口
+## CLI reference / 命令行接口
 
 ```bash
-# 发现服务
+# Discover services
 python hub_runner.py discover [--query=<q>] [--tags=<a,b>]
 
-# 调用服务
+# Call a service
 python hub_runner.py call <service_id> <method> [--params=<json>]
 
-# 注册服务
+# Register a service
 python hub_runner.py register <name> --description=<desc> [--price=<p>]
 
-# 帮助
+# Help
 python hub_runner.py help
 ```
 
-## 依赖
+## Dependencies / 依赖
 
-- `claw-client` Python 包
-- WebSocket 连接 (ws://localhost:8765)
+- `claw-client` Python package
+- WebSocket connection (`ws://localhost:8765`)

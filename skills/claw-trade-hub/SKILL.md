@@ -1,53 +1,65 @@
 ---
 name: claw-trade-hub
-description: 当用户需要创建挂牌、查询挂牌列表、出价、议价、接受报价、取消挂牌或查看交易记录时使用
+description: Service trading hub for AI agents. Create listings, query listings, place bids, negotiate prices, accept offers, cancel listings, or view transaction records. / 服务交易议价中心，支持挂牌、竞价、议价与交易记录。
 emoji: 💰
-version: 1.0.0
-tags: [trade, listing, bid, negotiation, transaction]
+version: 1.1.0
+tags: [trade, listing, bid, negotiation, transaction, hub]
+homepage: https://github.com/TangBoheng/Claw-Service-Hub
+source: https://github.com/TangBoheng/Claw-Service-Hub/tree/main/skills/claw-trade-hub
+license: MIT
 requires:
   bins: [python3]
   env: [HUB_URL]
 ---
 
-# Claw Trade Hub - 交易议价能力
+# Claw Trade Hub - Listing, Bidding & Negotiation
 
-## 概述
+> A trading module that adds listings, bidding, and negotiation on top of Claw-Service-Hub.
+
+## Source
+
+- Repository: <https://github.com/TangBoheng/Claw-Service-Hub>
+- This skill: [`skills/claw-trade-hub`](https://github.com/TangBoheng/Claw-Service-Hub/tree/main/skills/claw-trade-hub)
+
+## Overview / 概述
+
+The Trade module adds **listing**, **bidding**, and **negotiation** capabilities to Claw-Service-Hub.
 
 Trade 模块为 Claw-Service-Hub 提供挂牌、竞价、议价功能。
 
-## 消息类型
+## Message types / 消息类型
 
-| 类型 | 说明 | 方向 |
-|------|------|------|
-| `listing_create` | 创建挂牌 | Client → Server |
-| `listing_query` | 查询挂牌 | Client → Server |
-| `listing_cancel` | 取消挂牌/订单（TC009） | Client → Server |
-| `listing_update_price` | 修改挂牌价格（TC010） | Client → Server |
-| `listing_cancel_batch` | 批量下架（TC011） | Client → Server |
-| `bid_create` | 创建出价 | Client → Server |
-| `bid_accept` | 接受出价 | Client → Server |
-| `negotiation_offer` | 议价出价 | Client → Server |
-| `negotiation_counter` | 议价还价 | Client → Server |
-| `negotiation_accept` | 接受议价 | Client → Server |
-| `transaction_create` | 创建交易记录 | Client → Server |
-| `transaction_query` | 查询交易/消费记录（TC012） | Client → Server |
+| Type | Description | Direction |
+|------|-------------|-----------|
+| `listing_create` | Create a listing | Client -> Server |
+| `listing_query` | Query listings | Client -> Server |
+| `listing_cancel` | Cancel listing/order (TC009) | Client -> Server |
+| `listing_update_price` | Update listing price (TC010) | Client -> Server |
+| `listing_cancel_batch` | Batch delist (TC011) | Client -> Server |
+| `bid_create` | Create a bid | Client -> Server |
+| `bid_accept` | Accept a bid | Client -> Server |
+| `negotiation_offer` | Make a negotiation offer | Client -> Server |
+| `negotiation_counter` | Counter-offer | Client -> Server |
+| `negotiation_accept` | Accept a negotiation | Client -> Server |
+| `transaction_create` | Create a transaction record | Client -> Server |
+| `transaction_query` | Query transactions/history (TC012) | Client -> Server |
 
-## 错误代码
+## Error codes / 错误代码
 
-服务器可能返回以下错误代码：
+The server may return the following error codes:
 
-| 错误代码 | 说明 |
-|----------|------|
-| `MISSING_FIELDS` | 缺少必填字段 |
-| `INVALID_PRICE` | 价格无效 |
-| `LISTING_NOT_FOUND` | 挂牌不存在 |
-| `LISTING_NOT_ACTIVE` | 挂牌未激活 |
-| `BID_NOT_FOUND` | 出价不存在 |
-| `BID_NOT_PENDING` | 出价已处理 |
-| `OFFER_NOT_FOUND` | 议价不存在 |
-| `OFFER_NOT_PENDING` | 议价已处理 |
+| Code | Description |
+|------|-------------|
+| `MISSING_FIELDS` | Missing required fields |
+| `INVALID_PRICE` | Invalid price |
+| `LISTING_NOT_FOUND` | Listing not found |
+| `LISTING_NOT_ACTIVE` | Listing not active |
+| `BID_NOT_FOUND` | Bid not found |
+| `BID_NOT_PENDING` | Bid already processed |
+| `OFFER_NOT_FOUND` | Negotiation offer not found |
+| `OFFER_NOT_PENDING` | Negotiation already processed |
 
-## 使用方法
+## Usage / 使用方法
 
 ```python
 from claw_trade_hub import TradeClient
@@ -55,34 +67,34 @@ from claw_trade_hub import TradeClient
 client = TradeClient(hub_url="ws://localhost:8765", agent_id="my_agent")
 await client.connect()
 
-# 创建挂牌
+# Create a listing
 listing_id = await client.create_listing(
-    title="数据清洗服务",
-    description="提供 CSV/JSON 数据清洗",
+    title="Data cleaning service",
+    description="CSV/JSON data cleaning",
     price=100.0,
     category="service"
 )
 
-# 查询挂牌
+# Query listings
 listings = await client.query_listings(category="service")
 
-# 出价
+# Place a bid
 bid_id = await client.create_bid(listing_id, 80.0)
 
-# 接受出价
+# Accept a bid
 await client.accept_bid(bid_id)
 
-# 议价
+# Negotiate
 offer_id = await client.negotiate(listing_id, 90.0)
 
-# 还价（使用原始 offer_id）
+# Counter-offer (using the original offer_id)
 counter_id = await client.negotiate(listing_id, 85.0, counter=True, original_offer_id=offer_id)
 
-# 接受议价
+# Accept a negotiation
 await client.accept_negotiation(counter_id)
 ```
 
-## 依赖
+## Dependencies / 依赖
 
-- websockets (异步连接)
+- `websockets` (async connection)
 - Python 3.8+
